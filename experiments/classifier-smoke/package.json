@@ -1,0 +1,13 @@
+{
+  "name": "classifier-smoke",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Gemini classifier smoke tests for IELTS worksheet photos.",
+  "scripts": {
+    "classify": "node scripts/classify-samples.mjs"
+  },
+  "dependencies": {
+    "@google/genai": "^2.10.0"
+  }
+}

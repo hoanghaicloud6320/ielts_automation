@@ -1,0 +1,18 @@
+{
+  "name": "ielts-automation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "IELTS worksheet classification and submission automation.",
+  "bin": {
+    "ielts-auto": "bin/ielts-auto.mjs"
+  },
+  "scripts": {
+    "cli": "node bin/ielts-auto.mjs",
+    "submit:demo": "node bin/ielts-auto.mjs prepare-demo --sample-root build/tmp/sample_data --lesson-dir submit/les_demo && node bin/ielts-auto.mjs submit submit/les_demo",
+    "submit": "node bin/ielts-auto.mjs submit"
+  },
+  "dependencies": {
+    "@google/genai": "^2.10.0"
+  }
+}
