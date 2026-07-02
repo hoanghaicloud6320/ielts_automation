@@ -1,7 +1,10 @@
-build/
-node_modules/
-.npm-cache/
+/build/
+/node_modules/
+**/node_modules/
+/.npm-cache/
+**/.npm-cache/
 gemini-api-key.txt
 *.env
 dulieumau_drive-download-*.zip
 /submit/
+/experiments/
