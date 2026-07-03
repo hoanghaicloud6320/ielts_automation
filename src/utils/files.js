@@ -2,6 +2,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const GENERATED_DIR_NAMES = new Set([
+  "answers",
+  "classified",
+  "organized",
+  "reports",
+  "sorted_classified",
+]);
 
 export function isImageFile(filePath) {
   return IMAGE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
@@ -27,7 +34,7 @@ export async function listImageFiles(dirPath) {
   for (const entry of entries) {
     const fullPath = path.join(dirPath, entry.name);
     if (entry.isDirectory()) {
-      if (["classified", "reports"].includes(entry.name.toLowerCase())) {
+      if (GENERATED_DIR_NAMES.has(entry.name.toLowerCase())) {
         continue;
       }
       files.push(...(await listImageFiles(fullPath)));

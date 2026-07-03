@@ -85,6 +85,14 @@ node bin/ielts-auto.mjs submit submit/les_1
 node bin/ielts-auto.mjs submit submit/les_1 --dry-run
 ```
 
+### Tiep tuc lesson dang chay do
+
+Neu mang/API bi dung giua chung, chay lai voi `--resume`:
+
+```bash
+node bin/ielts-auto.mjs submit submit/les_1 --resume --dry-run
+```
+
 ### Bo qua upload
 
 ```bash
@@ -95,6 +103,70 @@ node bin/ielts-auto.mjs submit submit/les_1 --skip-upload
 
 ```bash
 node bin/ielts-auto.mjs classify submit/les_1/input/page.jpg
+```
+
+### Fetch dap an tu de goc chua lam
+
+Can chup de goc truoc khi lam bai. Neu anh da co chu viet tay, ket qua co the bi nhieu.
+
+Dat anh de goc vao:
+
+```text
+fetch/les_1/input/
+```
+
+Phan loai va gom trang theo skill:
+
+```bash
+node bin/ielts-auto.mjs fetch-answers fetch/les_1
+```
+
+Neu muon goi Gemini de trich dap an/guidance:
+
+```bash
+node bin/ielts-auto.mjs fetch-answers fetch/les_1 --extract-answers
+```
+
+Ket qua:
+
+```text
+fetch/les_1/organized/
+  reading/
+  listening/
+  speaking/
+  review/
+
+fetch/les_1/sorted_classified/
+  reading/
+  listening/
+  speaking/
+  review/
+
+fetch/les_1/answers/
+fetch/les_1/reports/
+```
+
+Pipeline fetch lam 2 buoc rieng:
+
+1. Classify anh vao `organized`.
+2. Reorder rieng tung skill va ghi vao `sorted_classified`.
+
+Khong gop classify va reorder vao cung mot prompt.
+
+### Thu nghiem sap xep thu tu trang
+
+Dung cho mot folder anh cung skill da bi xao tron:
+
+```bash
+node bin/ielts-auto.mjs reorder-pages fetch/les_1/organized/reading --skill reading
+```
+
+Lenh nay chi tra JSON thu tu trang, khong giai dap an.
+
+Neu muon test plumbing ma khong goi Gemini:
+
+```bash
+node bin/ielts-auto.mjs reorder-pages fetch/les_1/organized/reading --strategy filename
 ```
 
 ### Kiem tra rclone

@@ -1,0 +1,199 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { createGeminiClient } from "../ai/geminiClient.js";
+import { extractAnswersForSkill } from "../answers/extractAnswers.js";
+import { classifyImage } from "../classifier/imageClassifier.js";
+import { reorderPages } from "../reorder/pageReorderer.js";
+import { loadGeminiApiKey } from "../secrets/loadGeminiApiKey.js";
+import { copyFileEnsuringDir, ensureDir, listImageFiles, pathExists } from "../utils/files.js";
+
+const SKILL_LABELS = new Set(["reading", "listening", "speaking"]);
+
+export async function runFetchAnswersPipeline({
+  lessonDir,
+  cwd = process.cwd(),
+  model,
+  minConfidence = 0.75,
+  extractAnswers = false,
+  log = console.log,
+} = {}) {
+  if (!lessonDir) {
+    throw new Error("Missing lesson folder.");
+  }
+
+  const resolvedLessonDir = path.resolve(cwd, lessonDir);
+  if (!(await pathExists(resolvedLessonDir))) {
+    throw new Error(`Lesson folder does not exist: ${resolvedLessonDir}`);
+  }
+
+  log("WARNING: fetch-answers expects blank/original worksheet photos taken before the student writes answers.");
+  log("If the photos already contain handwriting, extracted answers may be contaminated.");
+
+  const apiKey = await loadGeminiApiKey({ cwd });
+  const gemini = createGeminiClient({ apiKey, model });
+  const imageFiles = await listImageFiles(resolvedLessonDir);
+
+  if (!imageFiles.length) {
+    throw new Error(`No images found in lesson folder: ${resolvedLessonDir}`);
+  }
+
+  const organizedRoot = path.join(resolvedLessonDir, "organized");
+  const sortedRoot = path.join(resolvedLessonDir, "sorted_classified");
+  const reportsDir = path.join(resolvedLessonDir, "reports");
+  const answersDir = path.join(resolvedLessonDir, "answers");
+  await fs.rm(organizedRoot, { recursive: true, force: true });
+  await fs.rm(sortedRoot, { recursive: true, force: true });
+  await ensureDir(reportsDir);
+  await ensureDir(answersDir);
+
+  const results = [];
+  const grouped = {
+    reading: [],
+    listening: [],
+    speaking: [],
+    review: [],
+  };
+
+  for (const imagePath of imageFiles) {
+    const relativePath = path.relative(resolvedLessonDir, imagePath);
+    log(`Classifying ${relativePath}...`);
+
+    const classification = await classifyImage({ gemini, imagePath });
+    const route = routeFetchClassification(classification, { minConfidence });
+    const targetPath = path.join(organizedRoot, route, path.basename(imagePath));
+    await copyFileEnsuringDir(imagePath, targetPath);
+    grouped[route].push(targetPath);
+
+    const warnings = [];
+    if (classification.is_completed_by_student) {
+      warnings.push("Image appears completed by student; fetch-answer accuracy may be contaminated.");
+    }
+    if (classification.is_answer_key_or_checked) {
+      warnings.push("Image appears checked/corrected; do not use it as a blank source.");
+    }
+
+    results.push({
+      source: relativePath,
+      routed_to: path.relative(resolvedLessonDir, targetPath),
+      classification,
+      warnings,
+    });
+
+    log(`  -> ${route} (${classification.primary_label}, confidence ${classification.confidence})`);
+  }
+
+  const reorderResults = [];
+  const sortedGrouped = {
+    reading: [],
+    listening: [],
+    speaking: [],
+    review: [],
+  };
+
+  for (const skill of ["reading", "listening", "speaking"]) {
+    const skillImages = grouped[skill].sort((a, b) => a.localeCompare(b));
+    if (!skillImages.length) {
+      reorderResults.push({
+        skill,
+        skipped: true,
+        reason: "No images for skill.",
+      });
+      continue;
+    }
+
+    log(`Reordering ${skill} pages locally within skill group...`);
+    const reorderResult = await reorderPages({ gemini, imagePaths: skillImages, skill });
+    const byFilename = new Map(skillImages.map((imagePath) => [path.basename(imagePath), imagePath]));
+    const sortedFiles = [];
+
+    for (const item of reorderResult.ordered_files) {
+      const sourcePath = byFilename.get(item.filename);
+      if (!sourcePath) {
+        continue;
+      }
+      const targetName = `${String(item.position).padStart(3, "0")}-${item.filename}`;
+      const targetPath = path.join(sortedRoot, skill, targetName);
+      await copyFileEnsuringDir(sourcePath, targetPath);
+      sortedFiles.push(targetPath);
+    }
+
+    sortedGrouped[skill] = sortedFiles;
+    reorderResults.push({
+      skill,
+      skipped: false,
+      ordered_files: reorderResult.ordered_files,
+      overall_confidence: reorderResult.overall_confidence,
+      warnings: reorderResult.warnings,
+    });
+  }
+
+  for (const [index, reviewPath] of grouped.review.sort((a, b) => a.localeCompare(b)).entries()) {
+    const targetPath = path.join(
+      sortedRoot,
+      "review",
+      `${String(index + 1).padStart(3, "0")}-${path.basename(reviewPath)}`,
+    );
+    await copyFileEnsuringDir(reviewPath, targetPath);
+    sortedGrouped.review.push(targetPath);
+  }
+
+  const answerResults = [];
+  if (extractAnswers) {
+    for (const skill of ["reading", "listening", "speaking"]) {
+      log(`Extracting answers for ${skill}...`);
+      const answer = await extractAnswersForSkill({
+        gemini,
+        skill,
+        imagePaths: sortedGrouped[skill],
+      });
+      answerResults.push(answer);
+      await fs.writeFile(path.join(answersDir, `${skill}.md`), answer.text || `No ${skill} answers extracted.\n`);
+    }
+  }
+
+  const report = {
+    lesson: path.basename(resolvedLessonDir),
+    model: gemini.model,
+    created_at: new Date().toISOString(),
+    warning:
+      "Use only blank/original worksheet photos for fetch-answers. Completed or corrected pages can contaminate extraction.",
+    classified_count: results.length,
+    min_confidence: minConfidence,
+    results,
+    reorder: {
+      enabled: true,
+      results: reorderResults,
+    },
+    answer_extraction: {
+      enabled: extractAnswers,
+      results: answerResults,
+    },
+  };
+
+  const reportPath = path.join(
+    reportsDir,
+    `fetch-answers-report-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+  );
+  await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
+
+  return {
+    lessonDir: resolvedLessonDir,
+    organizedRoot,
+    sortedRoot,
+    answersDir,
+    reportPath,
+    report,
+  };
+}
+
+function routeFetchClassification(classification, { minConfidence }) {
+  if (
+    SKILL_LABELS.has(classification.primary_label) &&
+    classification.confidence >= minConfidence &&
+    !classification.should_route_to_review
+  ) {
+    return classification.primary_label;
+  }
+
+  return "review";
+}

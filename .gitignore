@@ -6,5 +6,7 @@
 gemini-api-key.txt
 *.env
 dulieumau_drive-download-*.zip
+*.zip
 /submit/
+/fetch/
 /experiments/

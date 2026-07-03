@@ -5,14 +5,19 @@ import { classifyImage } from "../src/classifier/imageClassifier.js";
 import { parseArgs, numberOption } from "../src/cli/args.js";
 import { prepareDemoLessonFromSample } from "../src/cli/demoSamples.js";
 import { DEFAULT_UPLOAD_CONFIG } from "../src/config/defaults.js";
+import { runFetchAnswersPipeline } from "../src/fetch/runFetchAnswersPipeline.js";
+import { reorderPages } from "../src/reorder/pageReorderer.js";
 import { loadGeminiApiKey } from "../src/secrets/loadGeminiApiKey.js";
 import { runSubmitPipeline } from "../src/submit/runSubmitPipeline.js";
 import { checkRcloneRemote } from "../src/upload/rcloneUploader.js";
+import { listImageFiles } from "../src/utils/files.js";
 
 const HELP = `IELTS automation CLI
 
 Usage:
   ielts-auto submit <lessonDir> [--skip-upload] [--dry-run] [--remote ielts-drive] [--base-path IELTS/submissions] [--model gemini-3.1-flash-lite] [--min-confidence 0.75]
+  ielts-auto fetch-answers <lessonDir> [--extract-answers] [--model gemini-3.1-flash-lite] [--min-confidence 0.75]
+  ielts-auto reorder-pages <imageDir> [--skill reading|listening|speaking] [--strategy gemini|filename] [--model gemini-3.1-flash-lite]
   ielts-auto classify <imagePath> [--model gemini-3.1-flash-lite]
   ielts-auto prepare-demo --sample-root build/tmp/sample_data --lesson-dir submit/les_demo [--per-category 1]
   ielts-auto check
@@ -20,6 +25,8 @@ Usage:
 Examples:
   npm run submit -- submit/les_1
   node bin/ielts-auto.mjs submit submit/les_1 --dry-run
+  node bin/ielts-auto.mjs fetch-answers fetch/les_1
+  node bin/ielts-auto.mjs reorder-pages fetch/les_1/organized/reading --skill reading
   node bin/ielts-auto.mjs classify submit/les_1/input/page.jpg
 `;
 
@@ -31,6 +38,53 @@ async function main() {
     return;
   }
 
+  if (command === "reorder-pages") {
+    const imageDir = positionals[0];
+    if (!imageDir) {
+      throw new Error("Missing image directory.");
+    }
+    const imagePaths = await listImageFiles(imageDir);
+    const strategy = options.strategy || "gemini";
+    const result =
+      strategy === "filename"
+        ? {
+            ordered_files: imagePaths
+              .map((imagePath) => imagePath.split(/[\\/]/).at(-1))
+              .sort((a, b) => a.localeCompare(b))
+              .map((filename, index) => ({
+                filename,
+                position: index + 1,
+                confidence: 1,
+                evidence: ["Sorted by filename fallback strategy."],
+              })),
+            overall_confidence: 1,
+            warnings: ["Filename strategy is only a fallback/plumbing test, not visual page reorder."],
+          }
+        : await reorderWithGemini({ imagePaths, skill: options.skill || "unknown", model: options.model });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "fetch-answers") {
+    const lessonDir = positionals[0];
+    const result = await runFetchAnswersPipeline({
+      lessonDir,
+      model: options.model,
+      minConfidence: numberOption(options.minConfidence, 0.75),
+      extractAnswers: Boolean(options.extractAnswers),
+    });
+
+    console.log(`Report saved: ${result.reportPath}`);
+    console.log(`Classified pages: ${result.organizedRoot}`);
+    console.log(`Sorted classified pages: ${result.sortedRoot}`);
+    if (result.report.answer_extraction.enabled) {
+      console.log(`Answers saved in: ${result.answersDir}`);
+    } else {
+      console.log("Answer extraction skipped. Add --extract-answers when using clean blank source pages.");
+    }
+    return;
+  }
+
   if (command === "submit") {
     const lessonDir = positionals[0];
     const result = await runSubmitPipeline({
@@ -38,6 +92,7 @@ async function main() {
       model: options.model,
       minConfidence: numberOption(options.minConfidence, 0.75),
       skipUpload: Boolean(options.skipUpload),
+      resume: Boolean(options.resume),
       upload: {
         remote: options.remote || DEFAULT_UPLOAD_CONFIG.remote,
         basePath: options.basePath || DEFAULT_UPLOAD_CONFIG.basePath,
@@ -97,6 +152,16 @@ async function main() {
   }
 
   throw new Error(`Unknown command: ${command}\n\n${HELP}`);
+}
+
+async function reorderWithGemini({ imagePaths, skill, model }) {
+  const apiKey = await loadGeminiApiKey();
+  const gemini = createGeminiClient({ apiKey, model });
+  return reorderPages({
+    gemini,
+    imagePaths,
+    skill,
+  });
 }
 
 main().catch((error) => {

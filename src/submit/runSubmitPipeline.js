@@ -13,6 +13,7 @@ export async function runSubmitPipeline({
   model,
   minConfidence = 0.75,
   skipUpload = false,
+  resume = false,
   upload = {},
   log = console.log,
 } = {}) {
@@ -35,13 +36,31 @@ export async function runSubmitPipeline({
 
   const classifiedRoot = path.join(resolvedLessonDir, "classified");
   const reportsDir = path.join(resolvedLessonDir, "reports");
-  await fs.rm(classifiedRoot, { recursive: true, force: true });
   await ensureDir(reportsDir);
+  const progressPath = path.join(reportsDir, "submit-progress.json");
 
-  const results = [];
+  let results = [];
+  let startedAt = new Date().toISOString();
+
+  if (resume) {
+    const progress = await readProgress(progressPath);
+    if (progress) {
+      results = Array.isArray(progress.results) ? progress.results : [];
+      startedAt = progress.started_at ?? startedAt;
+      log(`Resuming from ${results.length}/${imageFiles.length} classified images.`);
+    }
+  } else {
+    await fs.rm(classifiedRoot, { recursive: true, force: true });
+  }
+
+  const doneSources = new Set(results.map((result) => normalizeRelativePath(result.source)));
 
   for (const imagePath of imageFiles) {
     const relativePath = path.relative(resolvedLessonDir, imagePath);
+    if (doneSources.has(normalizeRelativePath(relativePath))) {
+      continue;
+    }
+
     log(`Classifying ${relativePath}...`);
 
     const classification = await classifyImage({ gemini, imagePath });
@@ -56,11 +75,30 @@ export async function runSubmitPipeline({
     });
 
     log(`  -> ${route} (${classification.primary_label}, confidence ${classification.confidence})`);
+
+    await fs.writeFile(
+      progressPath,
+      JSON.stringify(
+        {
+          lesson: path.basename(resolvedLessonDir),
+          model: gemini.model,
+          started_at: startedAt,
+          updated_at: new Date().toISOString(),
+          classified_count: results.length,
+          total_count: imageFiles.length,
+          min_confidence: minConfidence,
+          results,
+        },
+        null,
+        2,
+      ),
+    );
   }
 
   const report = {
     lesson: path.basename(resolvedLessonDir),
     model: gemini.model,
+    started_at: startedAt,
     created_at: new Date().toISOString(),
     classified_count: results.length,
     min_confidence: minConfidence,
@@ -90,4 +128,16 @@ export async function runSubmitPipeline({
     reportPath,
     report,
   };
+}
+
+async function readProgress(progressPath) {
+  try {
+    return JSON.parse(await fs.readFile(progressPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRelativePath(filePath) {
+  return filePath.replaceAll("/", "\\").toLowerCase();
 }
