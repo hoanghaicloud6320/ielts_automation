@@ -1,7 +1,7 @@
 export const ANSWER_PROMPTS = {
   reading: `You are solving one IELTS reading unit from sorted photos of a blank/original worksheet.
 
-Return clean Markdown that is easy to compare against the worksheet.
+Return concise Markdown that is easy to compare against the worksheet.
 
 Rules:
 - Use all provided photos as one unit. Earlier images may contain the passage; later images may contain questions.
@@ -9,23 +9,21 @@ Rules:
 - If the photos are not blank/original, clearly warn that handwriting may contaminate the result.
 - Preserve section names, question groups, and question numbers.
 - If a photo also shows a neighboring unit or passage, ignore the neighboring content unless it is clearly part of the current unit.
-- For each answer, include the question number, a short question clue or blank sentence, the answer, and short evidence/reason.
+- Prioritize answers only. Do not explain unless the answer is unclear, debatable, or depends on a neighboring/cross-unit page.
+- For each answer, include the question number and answer. Include a short note only when useful.
 - For note/table/sentence completion, keep the numbering aligned to the exact blank shown in the worksheet. Do not shift answers between adjacent blanks.
-- If an answer cannot be determined from the visible unit, write "unclear" and explain what is missing.
+- If an answer cannot be determined from the visible unit, write "unclear - missing/unclear context".
 - Do not invent missing passage text or questions.
 
 Preferred format:
 # Reading Answers
 
-## Source Check
-- ...
-
 ## Answers
-| Question | Question clue | Answer | Evidence / reason |
-|---|---|---|---|
+| Question | Answer | Note |
+|---|---|---|
 
 ## Notes
-- ...`,
+- Only include this section if there are warnings or unclear items.`,
 
   listening: `Listening answer extraction is intentionally disabled in this pipeline until the matching audio files are available.
 
@@ -33,34 +31,26 @@ Return Markdown that says this unit requires audio and should be processed by th
 
   speaking: `You are preparing answer guidance for one IELTS speaking unit from sorted photos of a blank/original worksheet.
 
-Return clean Markdown that is easy to compare against the worksheet.
+Return concise Markdown that is easy to compare against the worksheet.
 
 Rules:
 - Use all provided photos as one unit.
 - Preserve prompts, topics, and task sections.
 - Focus only on the current unit title/id from the metadata. If a photo also shows a neighboring unit, ignore the neighboring unit unless it is clearly part of this unit.
-- Speaking questions usually do not have a single fixed answer. Provide strong sample answer ideas and compact model responses.
-- Keep answers natural, usable, and not overly long.
-- Include useful vocabulary only when it directly helps the prompt.
+- Speaking questions usually do not have a single fixed answer. Provide compact sample answers or answer ideas.
+- Keep answers natural, usable, and short.
+- Do not add explanations, strategy notes, or long vocabulary lists unless the prompt clearly needs them.
 - If handwriting is visible, warn that the image may not be a clean original.
 
 Preferred format:
 # Speaking Guidance
 
-## Source Check
-- ...
-
-## Topic / Task
-- ...
-
-## Prompt-by-prompt Guidance
+## Answers
 ### Question / cue
-- Main idea:
 - Sample answer:
-- Useful language:
 
 ## Notes
-- ...`,
+- Only include this section if there are warnings or unclear items.`,
 };
 
 export function answerPromptForSkill(skill) {

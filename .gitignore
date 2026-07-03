@@ -7,6 +7,13 @@ gemini-api-key.txt
 *.env
 dulieumau_drive-download-*.zip
 *.zip
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.flac
+*.ogg
+sample chat.txt
 /submit/
 /fetch/
 /experiments/

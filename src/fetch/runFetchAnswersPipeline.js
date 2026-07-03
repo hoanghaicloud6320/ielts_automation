@@ -1,14 +1,17 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createPartFromUri } from "@google/genai";
 import { createGeminiClient } from "../ai/geminiClient.js";
 import { extractAnswersForUnit } from "../answers/extractAnswers.js";
 import { classifyImage } from "../classifier/imageClassifier.js";
+import { buildListeningSkeleton, fillListeningSkeleton, transcribeListeningAudio } from "../listening/listeningExtractor.js";
 import { reorderPages } from "../reorder/pageReorderer.js";
 import { loadGeminiApiKey } from "../secrets/loadGeminiApiKey.js";
 import { groupPagesByUnit } from "../units/unitGrouper.js";
 import { copyFileEnsuringDir, ensureDir, listImageFiles, pathExists } from "../utils/files.js";
 
 const SKILL_LABELS = new Set(["reading", "listening", "speaking"]);
+const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"]);
 
 export async function runFetchAnswersPipeline({
   lessonDir,
@@ -29,10 +32,13 @@ export async function runFetchAnswersPipeline({
 
   log("WARNING: fetch-answers expects blank/original worksheet photos taken before the student writes answers.");
   log("If the photos already contain handwriting, extracted answers may be contaminated.");
+  log("Photo tips: keep text sharp, avoid glare/tilt, include full passage/questions, and include page/unit numbers when possible.");
+  log("Cross-unit photos are OK; the same image can be assigned to multiple units when needed.");
 
   const apiKey = await loadGeminiApiKey({ cwd });
   const gemini = createGeminiClient({ apiKey, model });
   const imageFiles = await listImageFiles(resolvedLessonDir);
+  const audioFiles = await listAudioFiles(resolvedLessonDir);
 
   if (!imageFiles.length) {
     throw new Error(`No images found in lesson folder: ${resolvedLessonDir}`);
@@ -240,14 +246,15 @@ export async function runFetchAnswersPipeline({
     }
 
     for (const unit of sortedUnits.listening) {
-      answerResults.push({
-        skill: "listening",
-        unit_id: unit.unit_id,
-        title: unit.title,
-        skipped: true,
-        reason: "Listening answer extraction requires audio and is handled by a separate future pipeline.",
-        text: "",
+      log(`Extracting listening answers for ${unit.unit_id}...`);
+      const answer = await extractListeningUnit({
+        gemini,
+        unit,
+        audioFiles,
+        answersDir,
+        log,
       });
+      answerResults.push(answer);
     }
   }
 
@@ -289,6 +296,137 @@ export async function runFetchAnswersPipeline({
     reportPath,
     report,
   };
+}
+
+async function extractListeningUnit({ gemini, unit, audioFiles, answersDir, log }) {
+  const audioPath = matchListeningAudio(unit, audioFiles);
+  if (!audioPath) {
+    return {
+      skill: "listening",
+      unit_id: unit.unit_id,
+      title: unit.title,
+      skipped: true,
+      reason: "No matching audio file found for listening unit.",
+      text: "",
+    };
+  }
+
+  const unitId = safeFileName(unit.unit_id);
+  const listeningDir = path.join(answersDir, "listening", unitId);
+  await ensureDir(listeningDir);
+
+  const audioName = unit.title || unit.unit_id || path.basename(audioPath, path.extname(audioPath));
+  log(`Uploading listening audio ${path.basename(audioPath)}...`);
+  const uploadedAudio = await gemini.ai.files.upload({
+    file: audioPath,
+    config: {
+      mimeType: mimeTypeForAudio(audioPath),
+      displayName: audioName,
+    },
+  });
+
+  log(`Transcribing listening/${unit.unit_id}...`);
+  const transcript = await transcribeListeningAudio({
+    gemini,
+    audioName,
+    audioPart: createPartFromUri(uploadedAudio.uri, uploadedAudio.mimeType ?? mimeTypeForAudio(audioPath)),
+    log,
+  });
+  await fs.writeFile(path.join(listeningDir, "transcript.txt"), transcript);
+
+  log(`Building listening skeleton for ${unit.unit_id}...`);
+  const skeleton = await buildListeningSkeleton({
+    gemini,
+    audioName,
+    imagePaths: unit.imagePaths,
+    log,
+  });
+  await fs.writeFile(path.join(listeningDir, "skeleton.json"), skeleton);
+
+  log(`Filling listening skeleton for ${unit.unit_id}...`);
+  const text = await fillListeningSkeleton({
+    gemini,
+    audioName,
+    transcript,
+    skeleton,
+    imagePaths: unit.imagePaths,
+    log,
+  });
+  await fs.writeFile(path.join(listeningDir, "answers.md"), text || `No listening answers extracted for ${unit.unit_id}.\n`);
+
+  return {
+    skill: "listening",
+    unit_id: unit.unit_id,
+    title: unit.title,
+    skipped: false,
+    audio: path.basename(audioPath),
+    transcript_path: path.join("listening", unitId, "transcript.txt"),
+    skeleton_path: path.join("listening", unitId, "skeleton.json"),
+    text,
+  };
+}
+
+function matchListeningAudio(unit, audioFiles) {
+  if (!audioFiles.length) {
+    return null;
+  }
+
+  const unitText = `${unit.unit_id ?? ""} ${unit.title ?? ""}`.toLowerCase();
+  const unitNumbers = extractNumbers(unitText);
+  for (const unitNumber of unitNumbers) {
+    const byNumber = audioFiles.find((audioPath) => {
+      const audioNumbers = extractNumbers(path.basename(audioPath).toLowerCase());
+      return audioNumbers.includes(unitNumber);
+    });
+    if (byNumber) {
+      return byNumber;
+    }
+  }
+
+  if (audioFiles.length === 1) {
+    return audioFiles[0];
+  }
+
+  const unitTokens = new Set(unitText.split(/[^a-z0-9]+/).filter(Boolean));
+  return (
+    audioFiles.find((audioPath) => {
+      const audioTokens = path.basename(audioPath).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      return audioTokens.some((token) => unitTokens.has(token));
+    }) ?? null
+  );
+}
+
+function extractNumbers(value) {
+  return (String(value).match(/\d+/g) ?? []).map((number) => String(Number(number)));
+}
+
+async function listAudioFiles(dirPath) {
+  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      if (["answers", "classified", "organized", "reports", "sorted_classified", "unit_groups"].includes(entry.name.toLowerCase())) {
+        continue;
+      }
+      files.push(...(await listAudioFiles(fullPath)));
+    } else if (entry.isFile() && AUDIO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+      files.push(fullPath);
+    }
+  }
+
+  return files.sort((a, b) => a.localeCompare(b));
+}
+
+function mimeTypeForAudio(audioPath) {
+  const lower = audioPath.toLowerCase();
+  if (lower.endsWith(".wav")) return "audio/wav";
+  if (lower.endsWith(".m4a")) return "audio/mp4";
+  if (lower.endsWith(".aac")) return "audio/aac";
+  if (lower.endsWith(".flac")) return "audio/flac";
+  if (lower.endsWith(".ogg")) return "audio/ogg";
+  return "audio/mpeg";
 }
 
 function safeFileName(value) {

@@ -80,7 +80,7 @@ async function main() {
     console.log(`Sorted classified pages: ${result.sortedRoot}`);
     if (result.report.answer_extraction.enabled) {
       console.log(`Answers saved in: ${result.answersDir}`);
-      console.log("Reading and speaking units were extracted; listening is skipped until audio support is added.");
+      console.log("Reading, speaking, and matching listening units were extracted when source pages/audio were available.");
     } else {
       console.log("Answer extraction skipped. Add --extract-answers when using clean blank source pages.");
     }

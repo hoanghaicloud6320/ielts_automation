@@ -109,6 +109,13 @@ node bin/ielts-auto.mjs classify submit/les_1/input/page.jpg
 
 Can chup de goc truoc khi lam bai. Neu anh da co chu viet tay, ket qua co the bi nhieu.
 
+Nen chup nhu sau:
+
+- Chu ro, khong mo, khong loang bong, han che nghieng anh.
+- Chup du passage/content va cau hoi cua unit.
+- Neu sach/co de co so trang hoac unit, nen de so trang/unit nam trong anh.
+- Trang cross-unit van chup binh thuong; he thong co the dua cung mot anh vao nhieu unit.
+
 Dat anh de goc vao:
 
 ```text
