@@ -121,11 +121,17 @@ Phan loai va gom trang theo skill:
 node bin/ielts-auto.mjs fetch-answers fetch/les_1
 ```
 
-Neu muon goi Gemini de trich dap an/guidance:
+Neu muon goi Gemini de trich dap an/guidance theo tung unit:
 
 ```bash
 node bin/ielts-auto.mjs fetch-answers fetch/les_1 --extract-answers
 ```
+
+Hien tai `--extract-answers` xu ly:
+
+- `reading`: giai bai theo tung unit, upload ca passage va cau hoi da sort cho Gemini.
+- `speaking`: tao answer guidance/sample answers theo tung unit.
+- `listening`: tam thoi skip vi can audio di kem, se co pipeline rieng sau.
 
 Ket qua:
 
@@ -147,6 +153,12 @@ fetch/les_1/sorted_classified/
   review/
 
 fetch/les_1/answers/
+  reading/
+    unit_x.md
+  speaking/
+    unit_y.md
+  reading.md
+  speaking.md
 fetch/les_1/reports/
 ```
 
@@ -155,6 +167,7 @@ Pipeline fetch lam 2 buoc rieng:
 1. Classify anh vao `organized`.
 2. Group unit rieng trong tung skill va ghi vao `unit_groups`.
 3. Reorder rieng tung unit va ghi vao `sorted_classified`.
+4. Neu co `--extract-answers`, trich dap an/guidance rieng tung unit va ghi vao `answers`.
 
 Khong gop classify, group unit va reorder vao cung mot prompt. Mot anh co the nam trong nhieu unit neu la trang cross-unit.
 

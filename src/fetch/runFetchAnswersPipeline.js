@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createGeminiClient } from "../ai/geminiClient.js";
-import { extractAnswersForSkill } from "../answers/extractAnswers.js";
+import { extractAnswersForUnit } from "../answers/extractAnswers.js";
 import { classifyImage } from "../classifier/imageClassifier.js";
 import { reorderPages } from "../reorder/pageReorderer.js";
 import { loadGeminiApiKey } from "../secrets/loadGeminiApiKey.js";
@@ -93,6 +93,11 @@ export async function runFetchAnswersPipeline({
     speaking: [],
     review: [],
   };
+  const sortedUnits = {
+    reading: [],
+    listening: [],
+    speaking: [],
+  };
 
   for (const skill of ["reading", "listening", "speaking"]) {
     const skillImages = grouped[skill].sort((a, b) => a.localeCompare(b));
@@ -172,6 +177,13 @@ export async function runFetchAnswersPipeline({
       }
 
       sortedGrouped[skill].push(...sortedFiles);
+      sortedUnits[skill].push({
+        skill,
+        unit_id: unit.unit_id,
+        title: unit.title,
+        imagePaths: sortedFiles,
+        source_files: unit.files,
+      });
       reorderResults.push({
         skill,
         unit_id: unit.unit_id,
@@ -196,15 +208,46 @@ export async function runFetchAnswersPipeline({
 
   const answerResults = [];
   if (extractAnswers) {
-    for (const skill of ["reading", "listening", "speaking"]) {
-      log(`Extracting answers for ${skill}...`);
-      const answer = await extractAnswersForSkill({
-        gemini,
-        skill,
-        imagePaths: sortedGrouped[skill],
+    for (const skill of ["reading", "speaking"]) {
+      const combinedAnswers = [];
+
+      for (const unit of sortedUnits[skill]) {
+        log(`Extracting answers for ${skill}/${unit.unit_id}...`);
+        const answer = await extractAnswersForUnit({
+          gemini,
+          skill,
+          unit,
+          imagePaths: unit.imagePaths,
+          log,
+        });
+        answerResults.push(answer);
+
+        const unitAnswersDir = path.join(answersDir, skill);
+        await ensureDir(unitAnswersDir);
+        const answerText = answer.text || `No answers extracted for ${skill}/${unit.unit_id}.\n`;
+        await fs.writeFile(path.join(unitAnswersDir, `${safeFileName(unit.unit_id)}.md`), answerText);
+
+        combinedAnswers.push([
+          `# ${skill}/${unit.unit_id}`,
+          unit.title ? `\nTitle: ${unit.title}\n` : "",
+          answerText,
+        ].join("\n"));
+      }
+
+      if (combinedAnswers.length) {
+        await fs.writeFile(path.join(answersDir, `${skill}.md`), `${combinedAnswers.join("\n\n---\n\n")}\n`);
+      }
+    }
+
+    for (const unit of sortedUnits.listening) {
+      answerResults.push({
+        skill: "listening",
+        unit_id: unit.unit_id,
+        title: unit.title,
+        skipped: true,
+        reason: "Listening answer extraction requires audio and is handled by a separate future pipeline.",
+        text: "",
       });
-      answerResults.push(answer);
-      await fs.writeFile(path.join(answersDir, `${skill}.md`), answer.text || `No ${skill} answers extracted.\n`);
     }
   }
 
@@ -246,6 +289,13 @@ export async function runFetchAnswersPipeline({
     reportPath,
     report,
   };
+}
+
+function safeFileName(value) {
+  return String(value || "unit")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 120);
 }
 
 function routeFetchClassification(classification, { minConfidence }) {
