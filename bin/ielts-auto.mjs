@@ -76,6 +76,7 @@ async function main() {
 
     console.log(`Report saved: ${result.reportPath}`);
     console.log(`Classified pages: ${result.organizedRoot}`);
+    console.log(`Unit groups: ${result.unitGroupsRoot}`);
     console.log(`Sorted classified pages: ${result.sortedRoot}`);
     if (result.report.answer_extraction.enabled) {
       console.log(`Answers saved in: ${result.answersDir}`);

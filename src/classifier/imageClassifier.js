@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { generateContentWithRetry } from "../ai/generateWithRetry.js";
 import { CLASSIFICATION_PROMPT } from "./classificationPrompt.js";
 
 export function parseClassifierJson(text) {
@@ -8,25 +9,28 @@ export function parseClassifierJson(text) {
 
 export async function classifyImage({ gemini, imagePath }) {
   const bytes = await fs.readFile(imagePath);
-  const response = await gemini.ai.models.generateContent({
-    model: gemini.model,
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: CLASSIFICATION_PROMPT },
-          {
-            inlineData: {
-              mimeType: mimeTypeForImage(imagePath),
-              data: bytes.toString("base64"),
+  const response = await generateContentWithRetry({
+    ai: gemini.ai,
+    params: {
+      model: gemini.model,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: CLASSIFICATION_PROMPT },
+            {
+              inlineData: {
+                mimeType: mimeTypeForImage(imagePath),
+                data: bytes.toString("base64"),
+              },
             },
-          },
-        ],
+          ],
+        },
+      ],
+      config: {
+        temperature: 0,
+        responseMimeType: "application/json",
       },
-    ],
-    config: {
-      temperature: 0,
-      responseMimeType: "application/json",
     },
   });
 

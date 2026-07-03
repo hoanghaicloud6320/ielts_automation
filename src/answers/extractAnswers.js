@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { generateContentWithRetry } from "../ai/generateWithRetry.js";
 import { answerPromptForSkill } from "./answerPrompts.js";
 
 export async function extractAnswersForSkill({ gemini, skill, imagePaths }) {
@@ -26,16 +27,19 @@ export async function extractAnswersForSkill({ gemini, skill, imagePaths }) {
     });
   }
 
-  const response = await gemini.ai.models.generateContent({
-    model: gemini.model,
-    contents: [
-      {
-        role: "user",
-        parts,
+  const response = await generateContentWithRetry({
+    ai: gemini.ai,
+    params: {
+      model: gemini.model,
+      contents: [
+        {
+          role: "user",
+          parts,
+        },
+      ],
+      config: {
+        temperature: 0,
       },
-    ],
-    config: {
-      temperature: 0,
     },
   });
 

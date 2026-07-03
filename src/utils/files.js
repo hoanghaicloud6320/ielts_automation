@@ -8,6 +8,7 @@ const GENERATED_DIR_NAMES = new Set([
   "organized",
   "reports",
   "sorted_classified",
+  "unit_groups",
 ]);
 
 export function isImageFile(filePath) {

@@ -136,6 +136,10 @@ fetch/les_1/organized/
   speaking/
   review/
 
+fetch/les_1/unit_groups/
+  reading/
+  speaking/
+
 fetch/les_1/sorted_classified/
   reading/
   listening/
@@ -149,9 +153,10 @@ fetch/les_1/reports/
 Pipeline fetch lam 2 buoc rieng:
 
 1. Classify anh vao `organized`.
-2. Reorder rieng tung skill va ghi vao `sorted_classified`.
+2. Group unit rieng trong tung skill va ghi vao `unit_groups`.
+3. Reorder rieng tung unit va ghi vao `sorted_classified`.
 
-Khong gop classify va reorder vao cung mot prompt.
+Khong gop classify, group unit va reorder vao cung mot prompt. Mot anh co the nam trong nhieu unit neu la trang cross-unit.
 
 ### Thu nghiem sap xep thu tu trang
 

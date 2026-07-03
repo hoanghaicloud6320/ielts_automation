@@ -5,6 +5,7 @@ import { extractAnswersForSkill } from "../answers/extractAnswers.js";
 import { classifyImage } from "../classifier/imageClassifier.js";
 import { reorderPages } from "../reorder/pageReorderer.js";
 import { loadGeminiApiKey } from "../secrets/loadGeminiApiKey.js";
+import { groupPagesByUnit } from "../units/unitGrouper.js";
 import { copyFileEnsuringDir, ensureDir, listImageFiles, pathExists } from "../utils/files.js";
 
 const SKILL_LABELS = new Set(["reading", "listening", "speaking"]);
@@ -38,10 +39,12 @@ export async function runFetchAnswersPipeline({
   }
 
   const organizedRoot = path.join(resolvedLessonDir, "organized");
+  const unitGroupsRoot = path.join(resolvedLessonDir, "unit_groups");
   const sortedRoot = path.join(resolvedLessonDir, "sorted_classified");
   const reportsDir = path.join(resolvedLessonDir, "reports");
   const answersDir = path.join(resolvedLessonDir, "answers");
   await fs.rm(organizedRoot, { recursive: true, force: true });
+  await fs.rm(unitGroupsRoot, { recursive: true, force: true });
   await fs.rm(sortedRoot, { recursive: true, force: true });
   await ensureDir(reportsDir);
   await ensureDir(answersDir);
@@ -82,6 +85,7 @@ export async function runFetchAnswersPipeline({
     log(`  -> ${route} (${classification.primary_label}, confidence ${classification.confidence})`);
   }
 
+  const unitGroupingResults = [];
   const reorderResults = [];
   const sortedGrouped = {
     reading: [],
@@ -93,6 +97,11 @@ export async function runFetchAnswersPipeline({
   for (const skill of ["reading", "listening", "speaking"]) {
     const skillImages = grouped[skill].sort((a, b) => a.localeCompare(b));
     if (!skillImages.length) {
+      unitGroupingResults.push({
+        skill,
+        skipped: true,
+        reason: "No images for skill.",
+      });
       reorderResults.push({
         skill,
         skipped: true,
@@ -101,30 +110,78 @@ export async function runFetchAnswersPipeline({
       continue;
     }
 
-    log(`Reordering ${skill} pages locally within skill group...`);
-    const reorderResult = await reorderPages({ gemini, imagePaths: skillImages, skill });
+    log(`Grouping ${skill} pages into units...`);
+    const unitGrouping = await groupPagesByUnit({ gemini, imagePaths: skillImages, skill });
     const byFilename = new Map(skillImages.map((imagePath) => [path.basename(imagePath), imagePath]));
-    const sortedFiles = [];
 
-    for (const item of reorderResult.ordered_files) {
-      const sourcePath = byFilename.get(item.filename);
-      if (!sourcePath) {
-        continue;
+    const copiedUnits = [];
+    for (const unit of unitGrouping.units) {
+      const unitFiles = [];
+      for (const file of unit.files) {
+        const sourcePath = byFilename.get(file.filename);
+        if (!sourcePath) {
+          continue;
+        }
+        const targetPath = path.join(unitGroupsRoot, skill, unit.unit_id, file.filename);
+        await copyFileEnsuringDir(sourcePath, targetPath);
+        unitFiles.push(targetPath);
       }
-      const targetName = `${String(item.position).padStart(3, "0")}-${item.filename}`;
-      const targetPath = path.join(sortedRoot, skill, targetName);
-      await copyFileEnsuringDir(sourcePath, targetPath);
-      sortedFiles.push(targetPath);
+
+      copiedUnits.push({
+        ...unit,
+        imagePaths: unitFiles,
+      });
     }
 
-    sortedGrouped[skill] = sortedFiles;
-    reorderResults.push({
+    unitGroupingResults.push({
       skill,
       skipped: false,
-      ordered_files: reorderResult.ordered_files,
-      overall_confidence: reorderResult.overall_confidence,
-      warnings: reorderResult.warnings,
+      units: unitGrouping.units,
+      warnings: unitGrouping.warnings,
     });
+
+    for (const unit of copiedUnits) {
+      if (!unit.imagePaths.length) {
+        reorderResults.push({
+          skill,
+          unit_id: unit.unit_id,
+          skipped: true,
+          reason: "No copied images for unit.",
+        });
+        continue;
+      }
+
+      log(`Reordering ${skill}/${unit.unit_id} pages...`);
+      const reorderResult = await reorderPages({
+        gemini,
+        imagePaths: unit.imagePaths.sort((a, b) => a.localeCompare(b)),
+        skill,
+      });
+      const unitByFilename = new Map(unit.imagePaths.map((imagePath) => [path.basename(imagePath), imagePath]));
+      const sortedFiles = [];
+
+      for (const item of reorderResult.ordered_files) {
+        const sourcePath = unitByFilename.get(item.filename);
+        if (!sourcePath) {
+          continue;
+        }
+        const targetName = `${String(item.position).padStart(3, "0")}-${item.filename}`;
+        const targetPath = path.join(sortedRoot, skill, unit.unit_id, targetName);
+        await copyFileEnsuringDir(sourcePath, targetPath);
+        sortedFiles.push(targetPath);
+      }
+
+      sortedGrouped[skill].push(...sortedFiles);
+      reorderResults.push({
+        skill,
+        unit_id: unit.unit_id,
+        unit_title: unit.title,
+        skipped: false,
+        ordered_files: reorderResult.ordered_files,
+        overall_confidence: reorderResult.overall_confidence,
+        warnings: reorderResult.warnings,
+      });
+    }
   }
 
   for (const [index, reviewPath] of grouped.review.sort((a, b) => a.localeCompare(b)).entries()) {
@@ -160,6 +217,10 @@ export async function runFetchAnswersPipeline({
     classified_count: results.length,
     min_confidence: minConfidence,
     results,
+    unit_grouping: {
+      enabled: true,
+      results: unitGroupingResults,
+    },
     reorder: {
       enabled: true,
       results: reorderResults,
@@ -179,6 +240,7 @@ export async function runFetchAnswersPipeline({
   return {
     lessonDir: resolvedLessonDir,
     organizedRoot,
+    unitGroupsRoot,
     sortedRoot,
     answersDir,
     reportPath,

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { generateContentWithRetry } from "../ai/generateWithRetry.js";
 import { buildReorderPrompt } from "./reorderPrompt.js";
 
 export async function reorderPages({ gemini, imagePaths, skill = "unknown" }) {
@@ -20,17 +21,20 @@ export async function reorderPages({ gemini, imagePaths, skill = "unknown" }) {
     });
   }
 
-  const response = await gemini.ai.models.generateContent({
-    model: gemini.model,
-    contents: [
-      {
-        role: "user",
-        parts,
+  const response = await generateContentWithRetry({
+    ai: gemini.ai,
+    params: {
+      model: gemini.model,
+      contents: [
+        {
+          role: "user",
+          parts,
+        },
+      ],
+      config: {
+        temperature: 0,
+        responseMimeType: "application/json",
       },
-    ],
-    config: {
-      temperature: 0,
-      responseMimeType: "application/json",
     },
   });
 
