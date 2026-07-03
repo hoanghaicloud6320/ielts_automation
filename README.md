@@ -1,251 +1,131 @@
 # IELTS Automation
 
-Tool tu dong phan loai anh bai tap IELTS va nop len Google Drive qua `rclone`.
+Tool co 2 nut chinh:
 
-## Chuan bi
+1. Fetch dap an tu de goc.
+2. Nop bai len Google Drive.
 
-1. Cai dependency:
+User chi can tha file vao 2 folder o root repo, roi chay lenh. `user_data/` la noi he thong tu luu session, cache, debug, classified, sorted, transcript, skeleton va answers.
 
-   ```bash
-   npm install
-   ```
+## Setup Mot Lan
 
-2. Dat Gemini API key vao file:
+### 1. Cai dependency
 
-   ```text
-   gemini-api-key.txt
-   ```
+```bash
+npm install
+```
 
-   Hoac dung bien moi truong:
+### 2. Dat Gemini API key
 
-   ```bash
-   GEMINI_API_KEY=your_key
-   ```
-
-3. Kiem tra `rclone` remote:
-
-   ```bash
-   node bin/ielts-auto.mjs check
-   ```
-
-   Remote mac dinh la:
-
-   ```text
-   ielts-drive:
-   ```
-
-## Cach Dung Nhanh
-
-Dat anh da lam vao:
+Tao file:
 
 ```text
-submit/les_1/input/
+gemini-api-key.txt
 ```
 
-Chay pipeline nop bai:
+Va paste API key vao do.
 
-```bash
-npm run submit -- submit/les_1
-```
+### 3. Config Google Drive bang rclone
 
-He thong se:
-
-- goi Gemini de phan loai anh
-- sap anh vao `reading`, `listening`, `speaking`, hoac `review`
-- upload folder da sap xep len Google Drive bang `rclone`
-- xuat report JSON trong `submit/les_1/reports`
-
-Ket qua local:
+Cai `rclone`, sau do config remote Google Drive ten:
 
 ```text
-submit/les_1/classified/
-  reading/
-  listening/
-  speaking/
-  review/
+ielts-drive
 ```
 
-Upload mac dinh:
-
-```text
-ielts-drive:IELTS/submissions/les_1
-```
-
-## Lenh CLI
-
-### Submit mot lesson
-
-```bash
-node bin/ielts-auto.mjs submit submit/les_1
-```
-
-### Submit nhung khong upload that
-
-```bash
-node bin/ielts-auto.mjs submit submit/les_1 --dry-run
-```
-
-### Tiep tuc lesson dang chay do
-
-Neu mang/API bi dung giua chung, chay lai voi `--resume`:
-
-```bash
-node bin/ielts-auto.mjs submit submit/les_1 --resume --dry-run
-```
-
-### Bo qua upload
-
-```bash
-node bin/ielts-auto.mjs submit submit/les_1 --skip-upload
-```
-
-### Phan loai mot anh
-
-```bash
-node bin/ielts-auto.mjs classify submit/les_1/input/page.jpg
-```
-
-### Fetch dap an tu de goc chua lam
-
-Can chup de goc truoc khi lam bai. Neu anh da co chu viet tay, ket qua co the bi nhieu.
-
-Nen chup nhu sau:
-
-- Chu ro, khong mo, khong loang bong, han che nghieng anh.
-- Chup du passage/content va cau hoi cua unit.
-- Neu sach/co de co so trang hoac unit, nen de so trang/unit nam trong anh.
-- Trang cross-unit van chup binh thuong; he thong co the dua cung mot anh vao nhieu unit.
-
-Dat anh de goc vao:
-
-```text
-fetch/les_1/input/
-```
-
-Phan loai va gom trang theo skill:
-
-```bash
-node bin/ielts-auto.mjs fetch-answers fetch/les_1
-```
-
-Neu muon goi Gemini de trich dap an/guidance theo tung unit:
-
-```bash
-node bin/ielts-auto.mjs fetch-answers fetch/les_1 --extract-answers
-```
-
-Hien tai `--extract-answers` xu ly:
-
-- `reading`: giai bai theo tung unit, upload ca passage va cau hoi da sort cho Gemini.
-- `speaking`: tao answer guidance/sample answers theo tung unit.
-- `listening`: tam thoi skip vi can audio di kem, se co pipeline rieng sau.
-
-Ket qua:
-
-```text
-fetch/les_1/organized/
-  reading/
-  listening/
-  speaking/
-  review/
-
-fetch/les_1/unit_groups/
-  reading/
-  speaking/
-
-fetch/les_1/sorted_classified/
-  reading/
-  listening/
-  speaking/
-  review/
-
-fetch/les_1/answers/
-  reading/
-    unit_x.md
-  speaking/
-    unit_y.md
-  reading.md
-  speaking.md
-fetch/les_1/reports/
-```
-
-Pipeline fetch lam 2 buoc rieng:
-
-1. Classify anh vao `organized`.
-2. Group unit rieng trong tung skill va ghi vao `unit_groups`.
-3. Reorder rieng tung unit va ghi vao `sorted_classified`.
-4. Neu co `--extract-answers`, trich dap an/guidance rieng tung unit va ghi vao `answers`.
-
-Khong gop classify, group unit va reorder vao cung mot prompt. Mot anh co the nam trong nhieu unit neu la trang cross-unit.
-
-### Thu nghiem sap xep thu tu trang
-
-Dung cho mot folder anh cung skill da bi xao tron:
-
-```bash
-node bin/ielts-auto.mjs reorder-pages fetch/les_1/organized/reading --skill reading
-```
-
-Lenh nay chi tra JSON thu tu trang, khong giai dap an.
-
-Neu muon test plumbing ma khong goi Gemini:
-
-```bash
-node bin/ielts-auto.mjs reorder-pages fetch/les_1/organized/reading --strategy filename
-```
-
-### Kiem tra rclone
+Thu nhanh:
 
 ```bash
 node bin/ielts-auto.mjs check
 ```
 
-### Tao lesson demo tu du lieu mau
-
-```bash
-node bin/ielts-auto.mjs prepare-demo --sample-root build/tmp/sample_data --lesson-dir submit/les_demo
-```
-
-Sau do chay:
-
-```bash
-node bin/ielts-auto.mjs submit submit/les_demo --dry-run
-```
-
-## Tuy Chinh
-
-Model mac dinh:
+Mac dinh bai nop se upload vao:
 
 ```text
-gemini-3.1-flash-lite
+ielts-drive:IELTS/submissions/<session_name>
 ```
 
-Doi model:
+## Cach Dung Hang Ngay
+
+### Nut 1: Fetch Dap An
+
+Bo tat ca anh de goc chua lam va audio vao:
+
+```text
+put_image_here_to_fetch_ans/
+```
+
+Chay:
 
 ```bash
-node bin/ielts-auto.mjs submit submit/les_1 --model gemini-3.1-flash-lite
+npm run fetch
 ```
 
-Doi nguong auto-route:
+He thong se tu:
+
+- copy input vao `user_data/fetch_sessions/<session_name>/`
+- phan loai skill
+- chia unit trong tung skill
+- sort trang trong tung unit
+- trich dap an
+- luu transcript/skeleton/debug khi co listening
+
+Ket qua dap an se nam trong:
+
+```text
+user_data/fetch_sessions/<session_name>/answers/
+```
+
+Sau khi chay xong, user co the tu xoa file trong:
+
+```text
+put_image_here_to_fetch_ans/
+```
+
+Luu y khi chup anh de goc:
+
+- Chup truoc khi lam bai.
+- Chu ro, khong mo, khong loang bong.
+- De so trang/unit/audio trong anh neu co.
+- Listening nen chup ro marker xanh va bo audio vao cung folder input.
+
+### Nut 2: Nop Bai
+
+Bo tat ca anh bai da lam vao:
+
+```text
+put_image_here_to_submit/
+```
+
+Chay:
 
 ```bash
-node bin/ielts-auto.mjs submit submit/les_1 --min-confidence 0.85
+npm run submit
 ```
 
-Doi noi upload:
+He thong se tu:
 
-```bash
-node bin/ielts-auto.mjs submit submit/les_1 --remote ielts-drive --base-path IELTS/submissions
+- copy input vao `user_data/submit_sessions/<session_name>/`
+- phan loai anh thanh `reading`, `listening`, `speaking`, `review`
+- sap vao folder local
+- upload len Google Drive bang `rclone`
+
+Mac dinh upload len:
+
+```text
+ielts-drive:IELTS/submissions/<session_name>
 ```
 
-## Luu Y
+Sau khi chay xong, user co the tu xoa file trong:
 
-- Anh `reading`, `listening`, `speaking` confidence cao se duoc auto-route.
-- Anh ghi chu, writing, bai qua mo ho, hoac bai co dau hieu khong ro se vao `review`.
-- `submit/`, `node_modules/`, `.npm-cache/`, `build/`, file key, va file zip mau da duoc ignore khoi git.
+```text
+put_image_here_to_submit/
+```
 
-Tai lieu chi tiet:
+## Chi Tiet Ky Thuat
 
-- `docs/submit-pipeline-map.md`
-- `docs/classification-invariants.md`
-- `docs/upload-transport-decision.md`
+Flag nang cao, lenh test, pipeline map, va cach debug nam trong:
+
+```text
+README_detail.md
+```

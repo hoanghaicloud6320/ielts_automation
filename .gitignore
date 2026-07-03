@@ -17,3 +17,8 @@ sample chat.txt
 /submit/
 /fetch/
 /experiments/
+/user_data/
+/put_image_here_to_fetch_ans/*
+!/put_image_here_to_fetch_ans/.gitkeep
+/put_image_here_to_submit/*
+!/put_image_here_to_submit/.gitkeep

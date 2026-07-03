@@ -4,10 +4,17 @@ import { createGeminiClient } from "../src/ai/geminiClient.js";
 import { classifyImage } from "../src/classifier/imageClassifier.js";
 import { parseArgs, numberOption } from "../src/cli/args.js";
 import { prepareDemoLessonFromSample } from "../src/cli/demoSamples.js";
-import { DEFAULT_UPLOAD_CONFIG } from "../src/config/defaults.js";
+import {
+  DEFAULT_FETCH_DROP_DIR,
+  DEFAULT_SUBMIT_DROP_DIR,
+  DEFAULT_UPLOAD_CONFIG,
+  defaultFetchSessionsRoot,
+  defaultSubmitSessionsRoot,
+} from "../src/config/defaults.js";
 import { runFetchAnswersPipeline } from "../src/fetch/runFetchAnswersPipeline.js";
 import { reorderPages } from "../src/reorder/pageReorderer.js";
 import { loadGeminiApiKey } from "../src/secrets/loadGeminiApiKey.js";
+import { createSessionFromDropDir, renameSessionFromFetchReport } from "../src/session/dropboxSessions.js";
 import { runSubmitPipeline } from "../src/submit/runSubmitPipeline.js";
 import { checkRcloneRemote } from "../src/upload/rcloneUploader.js";
 import { listImageFiles } from "../src/utils/files.js";
@@ -15,6 +22,8 @@ import { listImageFiles } from "../src/utils/files.js";
 const HELP = `IELTS automation CLI
 
 Usage:
+  ielts-auto fetch-lesson
+  ielts-auto submit-lesson
   ielts-auto submit <lessonDir> [--skip-upload] [--dry-run] [--remote ielts-drive] [--base-path IELTS/submissions] [--model gemini-3.1-flash-lite] [--min-confidence 0.75]
   ielts-auto fetch-answers <lessonDir> [--extract-answers] [--model gemini-3.1-flash-lite] [--min-confidence 0.75]
   ielts-auto reorder-pages <imageDir> [--skill reading|listening|speaking] [--strategy gemini|filename] [--model gemini-3.1-flash-lite]
@@ -23,7 +32,8 @@ Usage:
   ielts-auto check
 
 Examples:
-  npm run submit -- submit/les_1
+  npm run fetch
+  npm run submit
   node bin/ielts-auto.mjs submit submit/les_1 --dry-run
   node bin/ielts-auto.mjs fetch-answers fetch/les_1
   node bin/ielts-auto.mjs reorder-pages fetch/les_1/organized/reading --skill reading
@@ -35,6 +45,67 @@ async function main() {
 
   if (!command || command === "help" || options.help) {
     console.log(HELP);
+    return;
+  }
+
+  if (command === "fetch-lesson") {
+    if (positionals[0]) {
+      console.log("Note: fetch-lesson no longer needs a lesson number; using the root drop folder.");
+    }
+    const session = await createSessionFromDropDir({
+      dropDir: DEFAULT_FETCH_DROP_DIR,
+      sessionsRoot: defaultFetchSessionsRoot(),
+      prefix: "fetch",
+    });
+    console.log(`Session created: ${session.sessionDir}`);
+
+    const result = await runFetchAnswersPipeline({
+      lessonDir: session.sessionDir,
+      model: options.model,
+      minConfidence: numberOption(options.minConfidence, 0.75),
+      extractAnswers: true,
+    });
+    const renamed = await renameSessionFromFetchReport({
+      sessionDir: session.sessionDir,
+      report: result.report,
+    });
+
+    console.log(`Session saved: ${renamed.sessionDir}`);
+    console.log(`Answers saved in: ${renamed.sessionDir}/answers`);
+    console.log(`Report saved in: ${renamed.sessionDir}/reports`);
+    return;
+  }
+
+  if (command === "submit-lesson") {
+    if (positionals[0]) {
+      console.log("Note: submit-lesson no longer needs a lesson number; using the root drop folder.");
+    }
+    const session = await createSessionFromDropDir({
+      dropDir: DEFAULT_SUBMIT_DROP_DIR,
+      sessionsRoot: defaultSubmitSessionsRoot(),
+      prefix: "submit",
+    });
+    console.log(`Session created: ${session.sessionDir}`);
+
+    const result = await runSubmitPipeline({
+      lessonDir: session.sessionDir,
+      model: options.model,
+      minConfidence: numberOption(options.minConfidence, 0.75),
+      resume: true,
+      upload: {
+        lessonName: session.sessionName,
+        remote: options.remote || DEFAULT_UPLOAD_CONFIG.remote,
+        basePath: options.basePath || DEFAULT_UPLOAD_CONFIG.basePath,
+        dryRun: Boolean(options.dryRun),
+      },
+    });
+
+    console.log(`Report saved: ${result.reportPath}`);
+    if (result.report.upload?.dryRun) {
+      console.log(`Upload dry run target: ${result.report.upload.remotePath}`);
+    } else {
+      console.log(`Uploaded to: ${result.report.upload?.remotePath ?? "unknown target"}`);
+    }
     return;
   }
 

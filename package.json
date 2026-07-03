@@ -9,8 +9,10 @@
   },
   "scripts": {
     "cli": "node bin/ielts-auto.mjs",
+    "fetch": "node bin/ielts-auto.mjs fetch-lesson",
+    "submit": "node bin/ielts-auto.mjs submit-lesson",
     "submit:demo": "node bin/ielts-auto.mjs prepare-demo --sample-root build/tmp/sample_data --lesson-dir submit/les_demo && node bin/ielts-auto.mjs submit submit/les_demo",
-    "submit": "node bin/ielts-auto.mjs submit",
+    "submit:custom": "node bin/ielts-auto.mjs submit",
     "fetch-answers": "node bin/ielts-auto.mjs fetch-answers"
   },
   "dependencies": {
