@@ -193,14 +193,14 @@ fetch/les_1/answers/
 fetch/les_1/reports/
 ```
 
-Pipeline fetch lam 2 buoc rieng:
+Pipeline fetch hien tai:
 
-1. Classify anh vao `organized`.
-2. Group unit rieng trong tung skill va ghi vao `unit_groups`.
-3. Reorder rieng tung unit va ghi vao `sorted_classified`.
+1. Classify tat ca anh trong mot batch roi copy vao `organized`.
+2. Voi tung skill, sort toan bo anh cua skill truoc, sau do suy ra unit/group tu thu tu va ngu canh do.
+3. Copy anh vao `unit_groups` va `sorted_classified` theo unit. Anh cross-unit co the duoc copy vao nhieu unit voi metadata vung anh nhu `left page only` / `right page only`.
 4. Neu co `--extract-answers`, trich dap an/guidance rieng tung unit va ghi vao `answers`.
 
-Khong gop classify, group unit va reorder vao cung mot prompt. Mot anh co the nam trong nhieu unit neu la trang cross-unit.
+Classify van tach khoi sort/group. Sort va group duoc gop trong pham vi tung skill de AI co nhieu context hon truoc khi chia unit. Mot anh co the nam trong nhieu unit neu la trang cross-unit.
 
 ### Thu nghiem sap xep thu tu trang
 

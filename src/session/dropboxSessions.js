@@ -64,7 +64,7 @@ function inferFetchSessionName(report) {
     }
   }
 
-  return safeSlug(parts.join("__") || "ielts_session", { maxLength: 140 });
+  return safeSlug(parts.join("__") || "ielts_session", { maxLength: 72 });
 }
 
 async function copyUserFiles(sourceDir, targetDir) {
@@ -94,7 +94,7 @@ async function directoryHasUserFiles(dirPath) {
 }
 
 async function uniqueSessionDir(parentDir, name) {
-  const base = safeSlug(name, { maxLength: 180 });
+  const base = safeSlug(name, { maxLength: 120 });
   let candidate = path.join(parentDir, base);
   let counter = 2;
   while (await pathExists(candidate)) {

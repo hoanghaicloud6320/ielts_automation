@@ -16,10 +16,21 @@ export async function extractAnswersForUnit({ gemini, skill, unit, imagePaths, l
   }
 
   const parts = [{ text: answerPromptForUnit({ skill, unit }) }];
+  const fileScope = new Map(
+    (Array.isArray(unit?.source_files) ? unit.source_files : []).map((file) => [file.filename, file]),
+  );
+
   for (const imagePath of imagePaths) {
     const bytes = await fs.readFile(imagePath);
+    const filename = path.basename(imagePath).replace(/^\d+-/, "");
+    const scope = fileScope.get(filename);
+    const region = scope?.page_region || "whole image";
+    const pages =
+      Array.isArray(scope?.visible_pages) && scope.visible_pages.length
+        ? ` Visible pages for this unit: ${scope.visible_pages.join(", ")}.`
+        : "";
     parts.push({
-      text: `\nImage file: ${path.basename(imagePath)}`,
+      text: `\nImage file: ${path.basename(imagePath)}\nAllowed scope for current unit: ${region}.${pages} Ignore every other visible page/region in this image.`,
     });
     parts.push({
       inlineData: {

@@ -3,11 +3,10 @@ import path from "node:path";
 import { createPartFromUri } from "@google/genai";
 import { createGeminiClient } from "../ai/geminiClient.js";
 import { extractAnswersForUnit } from "../answers/extractAnswers.js";
-import { classifyImage } from "../classifier/imageClassifier.js";
+import { classifyImagesBatch } from "../classifier/imageClassifier.js";
 import { buildListeningSkeleton, fillListeningSkeleton, transcribeListeningAudio } from "../listening/listeningExtractor.js";
-import { reorderPages } from "../reorder/pageReorderer.js";
 import { loadGeminiApiKey } from "../secrets/loadGeminiApiKey.js";
-import { groupPagesByUnit } from "../units/unitGrouper.js";
+import { sortAndGroupSkillPages } from "../units/skillSortGrouper.js";
 import { copyFileEnsuringDir, ensureDir, listImageFiles, pathExists } from "../utils/files.js";
 
 const SKILL_LABELS = new Set(["reading", "listening", "speaking"]);
@@ -63,11 +62,17 @@ export async function runFetchAnswersPipeline({
     review: [],
   };
 
-  for (const imagePath of imageFiles) {
-    const relativePath = path.relative(resolvedLessonDir, imagePath);
-    log(`Classifying ${relativePath}...`);
+  log(`Classifying ${imageFiles.length} images as one batch...`);
+  const batchClassification = await classifyImagesBatch({ gemini, imagePaths: imageFiles });
+  const bySourceFilename = new Map(imageFiles.map((imagePath) => [path.basename(imagePath), imagePath]));
 
-    const classification = await classifyImage({ gemini, imagePath });
+  for (const item of batchClassification.results) {
+    const imagePath = bySourceFilename.get(item.filename);
+    if (!imagePath) {
+      continue;
+    }
+    const relativePath = path.relative(resolvedLessonDir, imagePath);
+    const classification = item.classification;
     const route = routeFetchClassification(classification, { minConfidence });
     const targetPath = path.join(organizedRoot, route, path.basename(imagePath));
     await copyFileEnsuringDir(imagePath, targetPath);
@@ -88,7 +93,7 @@ export async function runFetchAnswersPipeline({
       warnings,
     });
 
-    log(`  -> ${route} (${classification.primary_label}, confidence ${classification.confidence})`);
+    log(`  ${relativePath} -> ${route} (${classification.primary_label}, confidence ${classification.confidence})`);
   }
 
   const unitGroupingResults = [];
@@ -121,12 +126,12 @@ export async function runFetchAnswersPipeline({
       continue;
     }
 
-    log(`Grouping ${skill} pages into units...`);
-    const unitGrouping = await groupPagesByUnit({ gemini, imagePaths: skillImages, skill });
+    log(`Sorting and grouping all ${skill} pages...`);
+    const sortGroup = await sortAndGroupSkillPages({ gemini, imagePaths: skillImages, skill });
     const byFilename = new Map(skillImages.map((imagePath) => [path.basename(imagePath), imagePath]));
 
     const copiedUnits = [];
-    for (const unit of unitGrouping.units) {
+    for (const unit of sortGroup.units) {
       const unitFiles = [];
       for (const file of unit.files) {
         const sourcePath = byFilename.get(file.filename);
@@ -147,8 +152,10 @@ export async function runFetchAnswersPipeline({
     unitGroupingResults.push({
       skill,
       skipped: false,
-      units: unitGrouping.units,
-      warnings: unitGrouping.warnings,
+      strategy: "skill_sort_then_group",
+      global_order: sortGroup.global_order,
+      units: sortGroup.units,
+      warnings: sortGroup.warnings,
     });
 
     for (const unit of copiedUnits) {
@@ -162,16 +169,10 @@ export async function runFetchAnswersPipeline({
         continue;
       }
 
-      log(`Reordering ${skill}/${unit.unit_id} pages...`);
-      const reorderResult = await reorderPages({
-        gemini,
-        imagePaths: unit.imagePaths.sort((a, b) => a.localeCompare(b)),
-        skill,
-      });
       const unitByFilename = new Map(unit.imagePaths.map((imagePath) => [path.basename(imagePath), imagePath]));
       const sortedFiles = [];
 
-      for (const item of reorderResult.ordered_files) {
+      for (const item of unit.files) {
         const sourcePath = unitByFilename.get(item.filename);
         if (!sourcePath) {
           continue;
@@ -195,9 +196,10 @@ export async function runFetchAnswersPipeline({
         unit_id: unit.unit_id,
         unit_title: unit.title,
         skipped: false,
-        ordered_files: reorderResult.ordered_files,
-        overall_confidence: reorderResult.overall_confidence,
-        warnings: reorderResult.warnings,
+        strategy: "derived_from_skill_sort_group",
+        ordered_files: unit.files,
+        overall_confidence: unit.confidence,
+        warnings: unit.warnings,
       });
     }
   }
@@ -266,6 +268,7 @@ export async function runFetchAnswersPipeline({
       "Use only blank/original worksheet photos for fetch-answers. Completed or corrected pages can contaminate extraction.",
     classified_count: results.length,
     min_confidence: minConfidence,
+    batch_classification_warnings: batchClassification.warnings,
     results,
     unit_grouping: {
       enabled: true,
@@ -338,6 +341,7 @@ async function extractListeningUnit({ gemini, unit, audioFiles, answersDir, log 
   const skeleton = await buildListeningSkeleton({
     gemini,
     audioName,
+    transcript,
     imagePaths: unit.imagePaths,
     log,
   });

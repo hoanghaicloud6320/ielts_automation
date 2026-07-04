@@ -24,8 +24,8 @@ export async function transcribeListeningAudio({ gemini, audioName, audioPart, l
   return response.text ?? "";
 }
 
-export async function buildListeningSkeleton({ gemini, audioName, imagePaths, log = null }) {
-  const parts = [{ text: listeningSkeletonPrompt({ audioName }) }];
+export async function buildListeningSkeleton({ gemini, audioName, transcript = "", imagePaths, log = null }) {
+  const parts = [{ text: listeningSkeletonPrompt({ audioName, transcript }) }];
   await addImages(parts, imagePaths);
 
   const response = await generateContentWithRetry({

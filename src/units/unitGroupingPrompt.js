@@ -12,6 +12,9 @@ Rules:
 - Keep every provided filename in at least one unit.
 - Use stable short unit_id values like "unit_04", "lesson_5", "topic_clothes", or "unknown_unit_1".
 - Do not trust folder name or filename as a unit signal. Filenames may be scrambled.
+- Prefer splitting pages when visible headings/topics differ clearly, for example one page is a reading passage and another is sport vocabulary or a different numbered unit.
+- For cross-unit two-page spreads, include the image in both units only when both units are visibly present on that exact image. Otherwise do not attach unrelated neighboring pages to a unit just because they are adjacent in the batch.
+- For reading, a page with questions from one passage and a different passage starting on the same spread may belong to two units. Use evidence to decide each side separately.
 - If uncertain, create the best likely group and explain uncertainty.
 
 JSON schema:

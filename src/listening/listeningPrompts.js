@@ -23,7 +23,7 @@ Return Markdown:
 ...`;
 }
 
-export function listeningSkeletonPrompt({ audioName = "audio" } = {}) {
+export function listeningSkeletonPrompt({ audioName = "audio", transcript = "" } = {}) {
   return `You are reading sorted photos of one IELTS listening transcript-cloze worksheet.
 
 Audio metadata:
@@ -32,13 +32,23 @@ Audio metadata:
 Task:
 - Build a blank skeleton only.
 - Do not fill answers.
-- Do not use or infer from audio/transcript.
+- Use the transcript heavily as alignment context, but do not fill answers in this step.
+- The transcript tells you the exact text flow and helps locate every missing span. The worksheet photos tell you where the blanks are and how they are numbered.
 - Inspect every visible dotted/blank line in the worksheet photos.
 - Inspect every blue handwritten marker number.
 - The blue markers are absolute anchors. If a marker says 21, the blank line crossing or nearest that marker is blank 21.
 - Do not skip blank lines between one marker and the next.
 - After the final blue marker, continue counting every remaining visible blank line until the end of the worksheet/audio.
 - Ignore official IELTS navigation ranges like "questions 1 to 6"; this worksheet may contain many more transcript blanks.
+- Reconstruct each worksheet line locally. For every blank, create a line_template using [BLANK_N], for example "Everyone who goes into the kitchen must wear one, to protect against [BLANK_4]."
+- Place [BLANK_N] exactly where the visible dotted/underline blank is on the worksheet. Do not move the blank to make the sentence grammatical.
+- Never create a blank unless a visible blank/underline exists in the worksheet photo.
+- Use the transcript to reconstruct line_template around each visible blank, but place [BLANK_N] exactly where the visible blank/underline is on the worksheet.
+- If the printed words after a blank are not clearly readable, leave after as "" and keep line_template ending at [BLANK_N]. Do not invent after-context.
+- If the visible line says "plastic shower _____", the template must be "plastic shower [BLANK_N]", not "[BLANK_N] dispenser of plastic shower caps".
+- Prefer 5-14 nearby printed words in before/after. Avoid single generic words like "and", "that", "case", "things" unless there truly are no other visible words.
+- Do not put answer-like text inside before/after. before must be printed words before the blank; after must be printed words after the blank.
+- If a marker number is not visible but numbering between visible markers implies a block start, keep marker null but still make a normal 5-blank block.
 
 For each blank, capture local context:
 - before: short visible words immediately before the blank.
@@ -46,6 +56,7 @@ For each blank, capture local context:
 - speaker: speaker label near the blank, if visible.
 - page_hint: visible page number or image order hint, if available.
 - marker: blue marker number only when that blank is the marker anchor.
+- line_template: one local worksheet line or sentence with this blank replaced by [BLANK_N].
 
 Return strict JSON only. No Markdown.
 
@@ -68,6 +79,7 @@ Schema:
           "speaker": "MAN",
           "before": "Well, I've just moved here, and",
           "after": "",
+          "line_template": "Well, I've just moved here, and [BLANK_1]. I'll only be here for a year",
           "page_hint": "page 64",
           "visual_note": ""
         }
@@ -82,7 +94,11 @@ Rules:
 - Every number from 1 to expected_blank_count must appear exactly once.
 - Every number in visible_markers must be the first blank number of a block.
 - A block usually has five blanks, except the final block may have fewer.
-- If a blank is visible but context is hard to read, keep the number and write "unclear" in before/after or visual_note.`;
+- If the final visible marker is 31, that marker starts a block; it is not the end. Continue counting every visible blank after marker 31.
+- If a blank is visible but context is hard to read, keep the number and write "unclear" in before/after or visual_note.
+
+Transcript for alignment only:
+${transcript || "[TRANSCRIPT NOT AVAILABLE]"}`;
 }
 
 export function listeningFillSkeletonPrompt({ audioName = "audio", transcript = "", skeleton = "" } = {}) {
@@ -102,10 +118,13 @@ Core rule:
 - Fill exactly the blanks listed in the skeleton.
 - Use the transcript as the primary source for answer text.
 - Use each blank's before/after/speaker/signature context to find the matching local phrase in the transcript.
+- If line_template is present, align the entire template against the transcript and fill only the span represented by [BLANK_N].
 - The answer is the exact missing transcript span that was removed from the worksheet blank.
 - Many blanks are long phrases or clauses. Do not compress a phrase into one keyword.
 - Prefer the full contiguous transcript span that naturally fits the physical blank length in the worksheet photo.
 - Do not blindly choose the longest possible span. The answer must fit the visible dotted/blank line.
+- Choose the nearest transcript span immediately between the before and after context. Do not skip to a later sentence just because it also contains a related word.
+- If after is empty or unclear, choose the immediate next transcript words after before that fit the visible blank length; do not jump to a later clause.
 - Do not include words that are already printed after the blank in the worksheet photo.
 - Do not cross into the next printed sentence unless the same visible blank clearly spans that whole text.
 - If the worksheet blank spans a whole clause or sentence, return the whole clause or sentence. If it is a short lexical blank, return only that short phrase.

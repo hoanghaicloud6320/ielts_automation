@@ -12,9 +12,10 @@ Allowed primary labels:
 Important rules:
 - Classify by the visible image content, not by file path or folder name.
 - Mentally rotate the page if needed.
-- Reading: reading comprehension, passages/articles, "according to the reading/passage", pre-reading questions, vocabulary preview tied to a passage.
+- Reading: reading comprehension built around a visible passage/article, "according to the reading/passage", paragraph matching, true/false/not given, heading matching, or questions that clearly require a prose passage.
 - Listening: audio/track markers, transcript/dialogue with blanks, listen-and-complete tasks.
-- Speaking: personal prompts, "I can talk about...", "I can describe...", "ABOUT YOU", ask another student/partner, prompts intended for spoken answers. Also classify printed communication/vocabulary worksheets as speaking when they teach descriptive language, collocations, pictures, personal expression, or everyday speaking topics and are not clearly reading or listening.
+- Speaking: personal prompts, "I can talk about...", "I can describe...", "ABOUT YOU", ask another student/partner, prompts intended for spoken answers. Also classify printed communication/vocabulary worksheets as speaking when they teach descriptive language, collocations, pictures, personal expression, functional language, sport/travel/media/everyday topics, or "add your own words/expressions", and there is no clear reading passage/article driving the task.
+- A vocabulary/topic page should not be reading just because it has matching, gap-fill, or short example texts. Choose reading only when the visible task depends on a longer passage/article or explicit reading-comprehension instructions.
 - writing_or_notes: mostly handwritten notebook notes, essay planning, grammar notes, or feedback without printed worksheet structure.
 - Do not choose writing_or_notes only because the student wrote answers on a printed worksheet. A completed printed worksheet should keep its underlying skill label.
 - Checked/corrected work is not a primary label. Use flags for it.

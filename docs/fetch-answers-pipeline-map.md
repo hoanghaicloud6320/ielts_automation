@@ -25,20 +25,19 @@ node bin/ielts-auto.mjs fetch-answers fetch/les_1 --extract-answers
 
 ```text
 fetch/les_i/input
-  -> src/classifier
+  -> src/classifier batch classify
   -> fetch/les_i/organized
        reading/
        listening/
        speaking/
        review/
-  -> src/units, per skill only
+  -> src/units skill-wide sort + group
   -> fetch/les_i/unit_groups
        reading/unit_a/
        reading/unit_b/
        speaking/unit_a/
        speaking/unit_b/
        ...
-  -> src/reorder, per unit only
   -> fetch/les_i/sorted_classified
        reading/unit_a/
        reading/unit_b/
@@ -59,16 +58,18 @@ Implemented now:
 
 - classify blank/original page photos by visible content
 - group pages into skill folders
-- group pages into units locally inside each skill group
+- sort every skill group as a whole, then infer units from that ordered context
 - allow one cross-unit image to appear in multiple unit groups
-- reorder pages locally inside each unit group
+- preserve per-unit page regions such as `left page only` and `right page only`
 - write clean downstream input to `sorted_classified`
 - warn when classifier sees completed/checked pages
 - optional Gemini answer/guidance extraction per skill
+- listening answer extraction saves transcript, builds a transcript-aware blank skeleton, then fills that skeleton
 
 Still experimental:
 
 - answer extraction prompt quality
+- automatic physical image rotation
 - UI for comparing/checking answers
 
 ## Current Reorder Pipeline Test
@@ -87,7 +88,7 @@ Result:
 - local per-skill reorder created `sorted_classified/{reading,listening,speaking}`
 - expected order matched for all 12 test pages
 
-Important: unit grouping and reorder are performed only after classification, and separately inside each skill group. Reorder is then performed separately inside each unit group.
+Important: unit grouping and reorder are performed only after classification, and separately inside each skill group. The current strategy sorts all pages inside a skill first, then derives unit groups from that sorted context.
 
 Cross-unit fixture:
 
@@ -102,3 +103,4 @@ This fixture confirmed that one image can be copied into multiple unit groups be
 - `src/fetch`: pipeline orchestration for fetch answers.
 - `src/answers`: skill-specific answer/guidance prompts and Gemini answer extraction.
 - `src/classifier`: shared visual classifier.
+- `src/units/skillSortGrouper.js`: skill-wide sort and unit grouping with cross-unit page-region metadata.
