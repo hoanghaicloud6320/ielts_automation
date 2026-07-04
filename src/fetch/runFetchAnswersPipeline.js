@@ -4,9 +4,17 @@ import { createPartFromUri } from "@google/genai";
 import { createGeminiClient } from "../ai/geminiClient.js";
 import { extractAnswersForUnit } from "../answers/extractAnswers.js";
 import { classifyImagesBatch } from "../classifier/imageClassifier.js";
-import { buildListeningSkeleton, fillListeningSkeleton, transcribeListeningAudio } from "../listening/listeningExtractor.js";
+import {
+  buildListeningSkeletonFromDocumentInChunks,
+  createTwoBlockSkeletonChunksFromMarkers,
+  extractListeningMarkersFromDocument,
+  fillListeningSkeleton,
+  scanListeningWorksheetDocument,
+  transcribeListeningAudio,
+} from "../listening/listeningExtractor.js";
 import { loadGeminiApiKey } from "../secrets/loadGeminiApiKey.js";
-import { sortAndGroupSkillPages } from "../units/skillSortGrouper.js";
+import { inventorySkillPages } from "../units/pageInventory.js";
+import { sortAndGroupSkillPagesFromInventory } from "../units/skillSortGrouper.js";
 import { copyFileEnsuringDir, ensureDir, listImageFiles, pathExists } from "../utils/files.js";
 
 const SKILL_LABELS = new Set(["reading", "listening", "speaking"]);
@@ -126,8 +134,15 @@ export async function runFetchAnswersPipeline({
       continue;
     }
 
-    log(`Sorting and grouping all ${skill} pages...`);
-    const sortGroup = await sortAndGroupSkillPages({ gemini, imagePaths: skillImages, skill });
+    log(`Inventoring all ${skill} pages...`);
+    const inventories = await inventorySkillPages({ gemini, imagePaths: skillImages, skill, log });
+    log(`Sorting and grouping all ${skill} pages from inventory...`);
+    const sortGroup = await sortAndGroupSkillPagesFromInventory({
+      gemini,
+      imagePaths: skillImages,
+      inventories,
+      skill,
+    });
     const byFilename = new Map(skillImages.map((imagePath) => [path.basename(imagePath), imagePath]));
 
     const copiedUnits = [];
@@ -152,7 +167,8 @@ export async function runFetchAnswersPipeline({
     unitGroupingResults.push({
       skill,
       skipped: false,
-      strategy: "skill_sort_then_group",
+      strategy: "page_inventory_then_skill_sort_group",
+      page_inventory: inventories,
       global_order: sortGroup.global_order,
       units: sortGroup.units,
       warnings: sortGroup.warnings,
@@ -337,25 +353,65 @@ async function extractListeningUnit({ gemini, unit, audioFiles, answersDir, log 
   });
   await fs.writeFile(path.join(listeningDir, "transcript.txt"), transcript);
 
-  log(`Building listening skeleton for ${unit.unit_id}...`);
-  const skeleton = await buildListeningSkeleton({
-    gemini,
-    audioName,
-    transcript,
-    imagePaths: unit.imagePaths,
-    log,
-  });
-  await fs.writeFile(path.join(listeningDir, "skeleton.json"), skeleton);
+  const worksheetImages = uniqueImagePathsByOriginalName(unit.imagePaths);
 
-  log(`Filling listening skeleton for ${unit.unit_id}...`);
-  const text = await fillListeningSkeleton({
+  log(`Scanning listening worksheet document for ${unit.unit_id}...`);
+  const ocrDocument = await scanListeningWorksheetDocument({
+    gemini,
+    audioName,
+    imagePaths: worksheetImages,
+    log,
+  });
+  await fs.writeFile(path.join(listeningDir, "worksheet_ocr.md"), ocrDocument);
+
+  const markers = extractListeningMarkersFromDocument(ocrDocument);
+  const chunks = createTwoBlockSkeletonChunksFromMarkers(markers.length ? markers : [1, 6, 11, 16, 21, 26, 31]);
+
+  log(`Building listening skeleton from OCR document for ${unit.unit_id}...`);
+  const skeletonResult = await buildListeningSkeletonFromDocumentInChunks({
     gemini,
     audioName,
     transcript,
-    skeleton,
-    imagePaths: unit.imagePaths,
+    ocrDocument,
+    imagePaths: worksheetImages,
+    chunks,
     log,
   });
+  await fs.writeFile(path.join(listeningDir, "skeleton.json"), JSON.stringify(skeletonResult.combined, null, 2));
+
+  const skeletonChunksDir = path.join(listeningDir, "skeleton_chunks");
+  await ensureDir(skeletonChunksDir);
+  for (const chunk of skeletonResult.chunks) {
+    await fs.writeFile(
+      path.join(skeletonChunksDir, `skeleton_${String(chunk.start).padStart(2, "0")}_${chunk.end}.json`),
+      chunk.text,
+    );
+  }
+
+  const answerChunksDir = path.join(listeningDir, "answer_chunks");
+  await ensureDir(answerChunksDir);
+  const answerChunks = [];
+  for (const chunk of skeletonResult.chunks) {
+    log(`Filling listening skeleton chunk ${chunk.start}-${chunk.end} for ${unit.unit_id}...`);
+    const chunkText = await fillListeningSkeleton({
+      gemini,
+      audioName,
+      transcript,
+      skeleton: chunk.text,
+      imagePaths: [],
+      log,
+    });
+    answerChunks.push({
+      start: chunk.start,
+      end: chunk.end,
+      text: chunkText,
+    });
+    await fs.writeFile(
+      path.join(answerChunksDir, `answers_${String(chunk.start).padStart(2, "0")}_${chunk.end}.md`),
+      chunkText,
+    );
+  }
+  const text = answerChunks.map((chunk) => chunk.text.trim()).filter(Boolean).join("\n\n---\n\n");
   await fs.writeFile(path.join(listeningDir, "answers.md"), text || `No listening answers extracted for ${unit.unit_id}.\n`);
 
   return {
@@ -365,9 +421,26 @@ async function extractListeningUnit({ gemini, unit, audioFiles, answersDir, log 
     skipped: false,
     audio: path.basename(audioPath),
     transcript_path: path.join("listening", unitId, "transcript.txt"),
+    worksheet_ocr_path: path.join("listening", unitId, "worksheet_ocr.md"),
     skeleton_path: path.join("listening", unitId, "skeleton.json"),
+    skeleton_chunks_path: path.join("listening", unitId, "skeleton_chunks"),
+    answer_chunks_path: path.join("listening", unitId, "answer_chunks"),
     text,
   };
+}
+
+function uniqueImagePathsByOriginalName(imagePaths) {
+  const seen = new Set();
+  const unique = [];
+  for (const imagePath of imagePaths) {
+    const originalName = path.basename(imagePath).replace(/^\d+-/, "");
+    if (seen.has(originalName)) {
+      continue;
+    }
+    seen.add(originalName);
+    unique.push(imagePath);
+  }
+  return unique;
 }
 
 function matchListeningAudio(unit, audioFiles) {

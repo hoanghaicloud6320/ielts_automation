@@ -31,7 +31,8 @@ fetch/les_i/input
        listening/
        speaking/
        review/
-  -> src/units skill-wide sort + group
+  -> src/units per-image page inventory
+  -> src/units skill-wide sort + group from inventory
   -> fetch/les_i/unit_groups
        reading/unit_a/
        reading/unit_b/
@@ -59,16 +60,19 @@ Implemented now:
 - classify blank/original page photos by visible content
 - group pages into skill folders
 - sort every skill group as a whole, then infer units from that ordered context
+- create a per-image page inventory before sort/group so filenames stay attached to the right visible pages/regions
 - allow one cross-unit image to appear in multiple unit groups
 - preserve per-unit page regions such as `left page only` and `right page only`
 - write clean downstream input to `sorted_classified`
 - warn when classifier sees completed/checked pages
 - optional Gemini answer/guidance extraction per skill
-- listening answer extraction saves transcript, builds a transcript-aware blank skeleton, then fills that skeleton
+- listening answer extraction saves transcript, scans worksheet photos into an OCR-style worksheet document, builds chunked skeletons from that document, then fills those skeleton chunks from the transcript
 
 Still experimental:
 
 - answer extraction prompt quality
+- reading/speaking cross-page solve quality: prompt-only `page_region` is not enough when a bitmap contains neighboring pages. The solver can still read the forbidden half of the image. Next improvement: physically crop derived unit images by `page_region` before answer extraction, while keeping original images for debug.
+- speaking sort/group stability: now uses per-image page inventory before sort/group, then repairs speaking units from explicit unit-heading page starts. It still needs more sample validation.
 - automatic physical image rotation
 - UI for comparing/checking answers
 

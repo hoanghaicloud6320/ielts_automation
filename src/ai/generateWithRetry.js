@@ -19,7 +19,12 @@ export async function generateContentWithRetry({ ai, params, retries = 3, log = 
 
 function isRetryableGeminiError(error) {
   const message = error?.message ?? "";
-  return message.includes('"code":429') || message.includes("RESOURCE_EXHAUSTED");
+  return (
+    message.includes('"code":429') ||
+    message.includes('"code":503') ||
+    message.includes("RESOURCE_EXHAUSTED") ||
+    message.includes("UNAVAILABLE")
+  );
 }
 
 function retryDelayMs(error) {
