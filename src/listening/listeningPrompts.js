@@ -118,6 +118,11 @@ Marker rules:
 - They usually appear as 1, 6, 11, 16, 21, 26, 31, etc.
 - A circled marker is an absolute anchor for the first blank of a 5-answer block.
 - The marker is not printed worksheet text and not an answer.
+- First identify all circled blue marker numbers before assigning any marker to a blank.
+- Assign a marker to exactly one blank: the real blank line that the circle touches, overlaps, crosses, or is visually closest to.
+- Do not move a marker to an earlier/later blank just because the numbering pattern would seem nicer.
+- If several blanks are nearby, prefer the blank whose dotted line is horizontally aligned with the center of the circled number.
+- If the marker is between two dotted lines, use the line it physically touches/crosses; otherwise mark the assignment as uncertain in the note.
 
 Blank rules:
 - A real blank is a long printed dotted line or underline where transcript text was removed.
@@ -134,15 +139,19 @@ Output format:
 - Recreate the printed text line by line.
 - Represent every real blank as exactly one token:
   [[BLANK marker=6 confidence=0.95 lines=1]]
+- Do not reproduce the dotted/underline characters themselves. Replace the entire dotted/underline blank with the single [[BLANK ...]] token.
+- Never output long runs of "." or "_" for blank lines.
 - Use marker=null unless a circled blue marker touches, crosses, or is the nearest visual anchor to that exact blank.
 - If a blank continues across two visual lines, write one token with lines=2, not two blank tokens.
 - Preserve nearby punctuation around blank tokens.
 - Add a short "Blank inventory" table after each page with columns: visual_order, marker, nearby_before, nearby_after, lines, confidence, note.
+- Add a short "Marker inventory" table after each page with columns: marker, attached_visual_order, nearby_printed_text, assignment_reason, confidence.
 
 Important checks:
 - If the photo says "plastic shower caps. _____ ; everyone who", write "plastic shower caps. [[BLANK ...]]; everyone who". The word "caps." is printed before the blank.
 - If the photo says "hot _____ as you go through, just in case. _____", write two separate blank tokens.
-- Check circled marker 31 carefully if visible: the marker belongs to the blank it physically touches, not a later blank.`;
+- Check circled marker 31 carefully if visible: the marker belongs to the blank it physically touches, not a later blank or an earlier blank inferred from transcript flow.
+- For every non-null marker in a [[BLANK]] token, the same marker must appear in the Marker inventory and attached_visual_order must match that blank's visual_order.`;
 }
 
 export function listeningDocumentChunkSkeletonPrompt({

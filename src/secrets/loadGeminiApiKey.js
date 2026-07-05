@@ -8,7 +8,11 @@ export async function loadGeminiApiKey({ cwd = process.cwd() } = {}) {
   }
 
   const keyPath = path.join(cwd, "gemini-api-key.txt");
-  const key = (await fs.readFile(keyPath, "utf8")).trim();
+  const key = (await fs.readFile(keyPath, "utf8"))
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .at(-1);
   if (!key) {
     throw new Error(`Gemini API key file is empty: ${keyPath}`);
   }

@@ -79,6 +79,10 @@ export async function sortAndGroupSkillPagesFromInventory({
   });
 
   const normalized = normalizeSortGroupResult(parseJson(response.text ?? "{}"), imagePaths);
+  if (skill === "reading") {
+    return repairReadingSortGroupFromInventory({ result: normalized, inventories, imagePaths });
+  }
+
   if (skill === "speaking") {
     return repairSpeakingSortGroupFromInventory({ result: normalized, inventories, imagePaths });
   }
@@ -484,6 +488,137 @@ function repairSpeakingSortGroupFromInventory({ result, inventories, imagePaths 
       "Speaking groups repaired from per-image inventory using explicit unit-heading page starts.",
     ],
   };
+}
+
+function repairReadingSortGroupFromInventory({ result, inventories, imagePaths }) {
+  const regions = flattenInventoryRegions(inventories);
+  if (!regions.length) {
+    return result;
+  }
+
+  const orderedRegions = regions
+    .map((region, index) => ({ ...region, inputIndex: index, explicitPassage: explicitReadingPassage(region) }))
+    .sort((a, b) => {
+      if (a.pageNumber !== null && b.pageNumber !== null) return a.pageNumber - b.pageNumber;
+      if (a.pageNumber !== null) return -1;
+      if (b.pageNumber !== null) return 1;
+      return a.inputIndex - b.inputIndex;
+    });
+
+  let currentPassage = null;
+  const unitsById = new Map();
+
+  for (const region of orderedRegions) {
+    if (region.explicitPassage) {
+      currentPassage = region.explicitPassage;
+    } else if (!currentPassage && region.visible_units.length) {
+      currentPassage = fallbackReadingPassage(region, unitsById.size + 1);
+    }
+
+    if (!currentPassage) {
+      continue;
+    }
+
+    if (!unitsById.has(currentPassage.unit_id)) {
+      unitsById.set(currentPassage.unit_id, {
+        unit_id: currentPassage.unit_id,
+        title: currentPassage.title,
+        confidence: currentPassage.confidence,
+        files: [],
+        warnings: [],
+      });
+    }
+
+    const unit = unitsById.get(currentPassage.unit_id);
+    const pageRegion = pageRegionFor(region.region);
+    if (unit.files.some((file) => file.filename === region.filename && file.page_region === pageRegion)) {
+      continue;
+    }
+
+    unit.files.push({
+      filename: region.filename,
+      position: unit.files.length + 1,
+      page_region: pageRegion,
+      visible_pages: region.visible_pages,
+      confidence: region.explicitPassage ? 1 : 0.9,
+      evidence: region.explicitPassage
+        ? [`Explicit reading passage start detected for ${currentPassage.title}.`]
+        : [`Assigned by reading page-order repair after ${currentPassage.title} start.`],
+    });
+  }
+
+  const repairedUnits = [...unitsById.values()].filter((unit) => unit.files.length);
+  if (!repairedUnits.length) {
+    return result;
+  }
+
+  const filenameOrder = new Map(imagePaths.map((imagePath, index) => [path.basename(imagePath), index + 1]));
+  const globalOrder = [...new Map(orderedRegions.map((region) => [region.filename, region])).values()]
+    .sort((a, b) => {
+      if (a.pageNumber !== null && b.pageNumber !== null) return a.pageNumber - b.pageNumber;
+      return (filenameOrder.get(a.filename) ?? 9999) - (filenameOrder.get(b.filename) ?? 9999);
+    })
+    .map((region, index) => ({
+      filename: region.filename,
+      position: index + 1,
+      visible_pages: region.visible_pages,
+      visible_units: region.visible_units.map((unit) => unit.title),
+      orientation_note: region.orientation,
+      evidence: region.evidence,
+    }));
+
+  return {
+    global_order: globalOrder,
+    units: repairedUnits,
+    warnings: [
+      ...result.warnings,
+      "Reading groups repaired from per-image inventory using explicit passage starts and page continuity.",
+    ],
+  };
+}
+
+function explicitReadingPassage(region) {
+  const headingsText = region.section_headings.join(" ");
+  const unitText = region.visible_units.map((unit) => `${unit.unit_id ?? ""} ${unit.title ?? ""}`).join(" ");
+  const combined = `${headingsText} ${unitText}`;
+
+  const hasReadingPassageStart = /\breading\s+passage\s+\d+\b/i.test(combined);
+  const hasTestPassageStart = /\btest\s+\d+\b/i.test(combined) && /\breading\s+passage\s+\d+\b/i.test(combined);
+  if (!hasReadingPassageStart && !hasTestPassageStart) {
+    return null;
+  }
+
+  const preferredUnit =
+    region.visible_units.find((unit) => /\breading[_\s-]*passage[_\s-]*\d+\b/i.test(`${unit.unit_id ?? ""} ${unit.title ?? ""}`)) ??
+    region.visible_units.find((unit) => /reading/i.test(`${unit.unit_id ?? ""} ${unit.title ?? ""}`)) ??
+    region.visible_units[0];
+
+  const title = readingTitleFromRegion(region, preferredUnit);
+  return {
+    unit_id: slugify(preferredUnit?.unit_id || title || `reading_passage_${region.pageNumber ?? "unknown"}`),
+    title,
+    confidence: Number(preferredUnit?.confidence ?? 0.95),
+  };
+}
+
+function fallbackReadingPassage(region, fallbackIndex) {
+  const unit = region.visible_units[0];
+  const title = readingTitleFromRegion(region, unit);
+  return {
+    unit_id: slugify(unit?.unit_id || title || `reading_passage_${fallbackIndex}`),
+    title,
+    confidence: Number(unit?.confidence ?? 0.8),
+  };
+}
+
+function readingTitleFromRegion(region, unit) {
+  const unitTitle = String(unit?.title || "").trim();
+  if (unitTitle && !/^reading passage$/i.test(unitTitle)) {
+    return unitTitle;
+  }
+
+  const heading = region.section_headings.find((item) => /reading\s+passage|test\s+\d+/i.test(item));
+  return heading || unitTitle || `Reading passage starting page ${region.visible_pages[0] ?? "unknown"}`;
 }
 
 function flattenInventoryRegions(inventories) {
