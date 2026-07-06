@@ -44,10 +44,18 @@ export function alignListeningOcrToTranscript({ audioName = "audio", transcript 
     let answerEnd = rightMatch && rightMatch.score >= 0.55
       ? rightMatch.first_matched_index
       : Math.min(answerStart + 18, transcriptTokens.length);
+    answerEnd = tightenRightBoundary({
+      transcriptTokens,
+      rightAnchor,
+      answerStart,
+      answerEnd,
+    });
     if (answerEnd < answerStart) {
       answerEnd = answerStart;
     }
 
+    const trimmedSpan = trimAnswerSpanEdges({ transcriptTokens, answerStart, answerEnd, rightAnchor });
+    answerEnd = trimmedSpan.answerEnd;
     const answerTokens = transcriptTokens.slice(answerStart, answerEnd);
     const confidence = scoreBlank({ leftMatch, rightMatch, answerTokens, leftAnchor, rightAnchor });
     const blankWarnings = buildBlankWarnings({
@@ -199,17 +207,29 @@ function appendTextTokens(stream, text, pageHint) {
 
 function tokenizeTranscript(text) {
   return tokenizeText(
-    String(text ?? "")
+    stripListeningControlPhrases(String(text ?? ""))
       .replace(/^#.*$/gm, " ")
       .replace(/^- name:.*$/gim, " "),
   );
+}
+
+function stripListeningControlPhrases(text) {
+  return text
+    .replace(/\bNow we shall begin\./gi, " ")
+    .replace(/\bYou should answer the questions as you listen, because you will not hear the recording a second time\./gi, " ")
+    .replace(/\bListen carefully and answer questions\s+\d+\s+to\s+\d+\./gi, " ")
+    .replace(/\bNow listen carefully and answer questions\s+\d+\s+to\s+\d+\./gi, " ")
+    .replace(/\bNow listen and answer questions\s+\d+\s+to\s+\d+\./gi, " ")
+    .replace(/\bBefore you hear the rest of (?:the conversation|the talk), you have some time to look at questions\s+\d+\s+to\s+\d+\./gi, " ")
+    .replace(/\bThat is the end of section\s+\d+\./gi, " ")
+    .replace(/\bYou now have half a minute to check your answers\./gi, " ");
 }
 
 function tokenizeText(text) {
   return [...String(text ?? "").matchAll(TOKEN_PATTERN)].map((match) => ({
     raw: match[0],
     norm: normalizeToken(match[0]),
-  })).filter((token) => token.norm);
+  })).filter((token) => token.norm && !SPEAKER_TOKENS.has(token.norm));
 }
 
 function tokenWindowBefore(stream, streamIndex, size) {
@@ -234,7 +254,7 @@ function tokenWindowAfter(stream, streamIndex, size) {
 
 function anchorTokenObjects(localTokens, fallbackTokens, side) {
   const usefulLocal = localTokens.filter((token) => !LOW_INFORMATION_TOKENS.has(token.norm));
-  if (usefulLocal.length >= 2 || usefulLocal.some((token) => token.norm.length >= 5)) {
+  if (usefulLocal.length >= 2) {
     return side === "before" ? localTokens.slice(-8) : localTokens.slice(0, 8);
   }
   return fallbackTokens;
@@ -269,7 +289,66 @@ function findBestAnchorMatch(transcriptTokens, anchorTokens, { start, end, direc
     }
   }
 
+  if (direction === "right" && (!best || best.score < 0.72)) {
+    const edge = findSingleTokenBoundary(transcriptTokens, anchorTokens, { start: minIndex, end: maxIndex });
+    if (edge && (!best || edge.score > best.score)) {
+      best = edge;
+    }
+  }
+
   return best;
+}
+
+function findSingleTokenBoundary(transcriptTokens, anchorTokens, { start, end }) {
+  const useful = anchorTokens.filter((token) => !LOW_INFORMATION_TOKENS.has(token));
+  const candidates = useful.length ? useful : anchorTokens;
+  for (const anchorToken of candidates.slice(0, 3)) {
+    if (!anchorToken || anchorToken.length < 2) {
+      continue;
+    }
+    for (let index = start; index < end; index += 1) {
+      const similarity = tokenSimilarity(anchorToken, transcriptTokens[index].norm);
+      if (similarity >= 0.86) {
+        return {
+          direction: "right",
+          start,
+          first_matched_index: index,
+          end: index + 1,
+          score: Number(Math.min(0.74, similarity).toFixed(3)),
+          matched_tokens: [transcriptTokens[index].raw],
+          boundary_fallback: "single_token",
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function tightenRightBoundary({ transcriptTokens, rightAnchor, answerStart, answerEnd }) {
+  const firstAnchor = rightAnchor.find((token) => BOUNDARY_TRIM_TOKENS.has(token));
+  if (!firstAnchor || firstAnchor.length < 2) {
+    return answerEnd;
+  }
+  const maxLookahead = Math.min(answerEnd, answerStart + 14, transcriptTokens.length);
+  for (let index = answerStart; index < maxLookahead; index += 1) {
+    if (transcriptTokens[index].norm === firstAnchor) {
+      return index;
+    }
+  }
+  return answerEnd;
+}
+
+function trimAnswerSpanEdges({ transcriptTokens, answerStart, answerEnd, rightAnchor }) {
+  let end = answerEnd;
+  const rightAnchorSet = new Set(rightAnchor);
+  while (
+    end > answerStart &&
+    TRAILING_CONTEXT_TOKENS.has(transcriptTokens[end - 1]?.norm) &&
+    (rightAnchorSet.has(transcriptTokens[end - 1].norm) || ALWAYS_TRIM_TRAILING_TOKENS.has(transcriptTokens[end - 1].norm))
+  ) {
+    end -= 1;
+  }
+  return { answerEnd: end };
 }
 
 function fuzzySequenceMatch(transcriptTokens, anchorTokens, startIndex, direction) {
@@ -373,15 +452,16 @@ function untokenizeTranscript(tokens) {
 }
 
 function normalizeToken(token) {
-  return String(token ?? "")
+  const normalized = String(token ?? "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
+  return NUMBER_WORDS.get(normalized) ?? normalized;
 }
 
 function tokenSimilarity(a, b) {
   if (a === b) return 1;
   if (!a || !b) return 0;
-  if (a.length <= 2 || b.length <= 2) return a[0] === b[0] ? 0.75 : 0;
+  if (a.length <= 2 || b.length <= 2) return 0;
   if (a.includes(b) || b.includes(a)) {
     return Math.min(a.length, b.length) / Math.max(a.length, b.length);
   }
@@ -431,3 +511,45 @@ const LOW_INFORMATION_TOKENS = new Set([
   "we",
   "i",
 ]);
+
+const SPEAKER_TOKENS = new Set(["man", "woman", "speaker", "student", "tutor", "guide", "customer", "assistant"]);
+
+const NUMBER_WORDS = new Map([
+  ["zero", "0"],
+  ["one", "1"],
+  ["two", "2"],
+  ["three", "3"],
+  ["four", "4"],
+  ["five", "5"],
+  ["six", "6"],
+  ["seven", "7"],
+  ["eight", "8"],
+  ["nine", "9"],
+  ["ten", "10"],
+  ["twenty", "20"],
+  ["thirty", "30"],
+  ["forty", "40"],
+  ["fifty", "50"],
+  ["sixty", "60"],
+  ["seventy", "70"],
+  ["eighty", "80"],
+  ["ninety", "90"],
+]);
+
+const BOUNDARY_TRIM_TOKENS = new Set([
+  "ah",
+  "ok",
+  "okay",
+  "well",
+  "here",
+  "please",
+  "yes",
+  "yep",
+  "no",
+  "10",
+  "20",
+  "30",
+]);
+
+const TRAILING_CONTEXT_TOKENS = new Set(["ok", "okay"]);
+const ALWAYS_TRIM_TRAILING_TOKENS = new Set(["ok", "okay"]);
