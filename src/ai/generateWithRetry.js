@@ -19,11 +19,17 @@ export async function generateContentWithRetry({ ai, params, retries = 3, log = 
 
 function isRetryableGeminiError(error) {
   const message = error?.message ?? "";
+  const causeCode = error?.cause?.code ?? "";
+  const causeMessage = error?.cause?.message ?? "";
   return (
     message.includes('"code":429') ||
     message.includes('"code":503') ||
     message.includes("RESOURCE_EXHAUSTED") ||
-    message.includes("UNAVAILABLE")
+    message.includes("UNAVAILABLE") ||
+    message.includes("fetch failed") ||
+    message.includes("Headers Timeout Error") ||
+    causeCode === "UND_ERR_HEADERS_TIMEOUT" ||
+    causeMessage.includes("Headers Timeout Error")
   );
 }
 

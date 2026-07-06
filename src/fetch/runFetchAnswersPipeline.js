@@ -5,10 +5,6 @@ import { createGeminiClient } from "../ai/geminiClient.js";
 import { extractAnswersForUnit } from "../answers/extractAnswers.js";
 import { classifyImagesBatch } from "../classifier/imageClassifier.js";
 import {
-  buildListeningSkeletonFromDocumentInChunks,
-  createTwoBlockSkeletonChunksFromMarkers,
-  extractListeningMarkersFromDocument,
-  fillListeningSkeleton,
   scanListeningWorksheetDocument,
   transcribeListeningAudio,
 } from "../listening/listeningExtractor.js";
@@ -355,7 +351,7 @@ async function extractListeningUnit({ gemini, unit, audioFiles, answersDir, log 
 
   const worksheetImages = uniqueImagePathsByOriginalName(unit.imagePaths);
 
-  log(`Scanning listening worksheet document for ${unit.unit_id}...`);
+  log(`OCR scanning listening worksheet images for ${unit.unit_id}...`);
   const ocrDocument = await scanListeningWorksheetDocument({
     gemini,
     audioName,
@@ -363,56 +359,6 @@ async function extractListeningUnit({ gemini, unit, audioFiles, answersDir, log 
     log,
   });
   await fs.writeFile(path.join(listeningDir, "worksheet_ocr.md"), ocrDocument);
-
-  const markers = extractListeningMarkersFromDocument(ocrDocument);
-  const chunks = createTwoBlockSkeletonChunksFromMarkers(markers.length ? markers : [1, 6, 11, 16, 21, 26, 31]);
-
-  log(`Building listening skeleton from OCR document for ${unit.unit_id}...`);
-  const skeletonResult = await buildListeningSkeletonFromDocumentInChunks({
-    gemini,
-    audioName,
-    transcript,
-    ocrDocument,
-    imagePaths: worksheetImages,
-    chunks,
-    log,
-  });
-  await fs.writeFile(path.join(listeningDir, "skeleton.json"), JSON.stringify(skeletonResult.combined, null, 2));
-
-  const skeletonChunksDir = path.join(listeningDir, "skeleton_chunks");
-  await ensureDir(skeletonChunksDir);
-  for (const chunk of skeletonResult.chunks) {
-    await fs.writeFile(
-      path.join(skeletonChunksDir, `skeleton_${String(chunk.start).padStart(2, "0")}_${chunk.end}.json`),
-      chunk.text,
-    );
-  }
-
-  const answerChunksDir = path.join(listeningDir, "answer_chunks");
-  await ensureDir(answerChunksDir);
-  const answerChunks = [];
-  for (const chunk of skeletonResult.chunks) {
-    log(`Filling listening skeleton chunk ${chunk.start}-${chunk.end} for ${unit.unit_id}...`);
-    const chunkText = await fillListeningSkeleton({
-      gemini,
-      audioName,
-      transcript,
-      skeleton: chunk.text,
-      imagePaths: [],
-      log,
-    });
-    answerChunks.push({
-      start: chunk.start,
-      end: chunk.end,
-      text: chunkText,
-    });
-    await fs.writeFile(
-      path.join(answerChunksDir, `answers_${String(chunk.start).padStart(2, "0")}_${chunk.end}.md`),
-      chunkText,
-    );
-  }
-  const text = answerChunks.map((chunk) => chunk.text.trim()).filter(Boolean).join("\n\n---\n\n");
-  await fs.writeFile(path.join(listeningDir, "answers.md"), text || `No listening answers extracted for ${unit.unit_id}.\n`);
 
   return {
     skill: "listening",
@@ -422,10 +368,7 @@ async function extractListeningUnit({ gemini, unit, audioFiles, answersDir, log 
     audio: path.basename(audioPath),
     transcript_path: path.join("listening", unitId, "transcript.txt"),
     worksheet_ocr_path: path.join("listening", unitId, "worksheet_ocr.md"),
-    skeleton_path: path.join("listening", unitId, "skeleton.json"),
-    skeleton_chunks_path: path.join("listening", unitId, "skeleton_chunks"),
-    answer_chunks_path: path.join("listening", unitId, "answer_chunks"),
-    text,
+    text: ocrDocument,
   };
 }
 

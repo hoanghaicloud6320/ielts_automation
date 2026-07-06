@@ -101,57 +101,310 @@ Transcript for alignment only:
 ${transcript || "[TRANSCRIPT NOT AVAILABLE]"}`;
 }
 
-export function listeningOcrDocumentPrompt({ audioName = "audio" } = {}) {
-  return `You are doing OCR/document reconstruction for IELTS listening worksheet photos.
+export function listeningOcrDocumentPrompt({ audioName = "audio", transcript = "" } = {}) {
+  return `You are doing neutral OCR for IELTS listening worksheet photos.
 
 Audio metadata:
 - audio_name: ${audioName}
 
 Goal:
-- Recreate the printed worksheet as a clean Markdown document.
+- Transcribe all visible text in the supplied worksheet photos as faithfully as possible.
+- Preserve page separation and approximate visual reading order.
+- Include printed text, speaker labels, page numbers, audio numbers, handwriting, circled numbers, and other visible annotations.
+- Preserve dotted/underlined worksheet gaps as visible OCR artifacts; use "[blank line]" when a gap is clearer than literal dots.
 - Do not solve the exercise.
-- Do not infer answers.
-- Preserve the printed text, speaker labels, page numbers, audio number, handwritten marker locations, and visual blank locations.
-
-Marker rules:
-- Handwritten markers are blue ballpoint-pen numbers inside hand-drawn circles.
-- They usually appear as 1, 6, 11, 16, 21, 26, 31, etc.
-- A circled marker is an absolute anchor for the first blank of a 5-answer block.
-- The marker is not printed worksheet text and not an answer.
-- First identify all circled blue marker numbers before assigning any marker to a blank.
-- Assign a marker to exactly one blank: the real blank line that the circle touches, overlaps, crosses, or is visually closest to.
-- Do not move a marker to an earlier/later blank just because the numbering pattern would seem nicer.
-- If several blanks are nearby, prefer the blank whose dotted line is horizontally aligned with the center of the circled number.
-- If the marker is between two dotted lines, use the line it physically touches/crosses; otherwise mark the assignment as uncertain in the note.
-
-Blank rules:
-- A real blank is a long printed dotted line or underline where transcript text was removed.
-- It may span one line or continue on the next visual line.
-- If a dotted line continues onto the next visual line without a new printed lead-in, speaker turn, or marker, treat it as the same blank.
-- Tiny ellipses in printed dialogue, such as "...", "Good ...", "Ah ...", "Now...", are not blanks.
-- Punctuation dots, show-through text, page shadows, and circled marker outlines are not blanks.
+- Do not infer missing words from audio or transcript.
+- Do not build a skeleton.
+- Do not assign answer numbers.
+- Do not create marker or blank inventories.
+- Do not summarize.
 
 Output format:
 - Markdown only.
+- Plain OCR transcript only.
 - Process images in the provided order.
 - Split visible left/right pages if an image contains a book spread.
-- Use headings like "## Image 1 / left page 68".
-- Recreate the printed text line by line.
-- Represent every real blank as exactly one token:
-  [[BLANK marker=6 confidence=0.95 lines=1]]
-- Do not reproduce the dotted/underline characters themselves. Replace the entire dotted/underline blank with the single [[BLANK ...]] token.
-- Never output long runs of "." or "_" for blank lines.
-- Use marker=null unless a circled blue marker touches, crosses, or is the nearest visual anchor to that exact blank.
-- If a blank continues across two visual lines, write one token with lines=2, not two blank tokens.
-- Preserve nearby punctuation around blank tokens.
-- Add a short "Blank inventory" table after each page with columns: visual_order, marker, nearby_before, nearby_after, lines, confidence, note.
-- Add a short "Marker inventory" table after each page with columns: marker, attached_visual_order, nearby_printed_text, assignment_reason, confidence.
+- Use headings like "## Image 1 / left page" or "## Image 1 / right page" when useful.
+- Keep line breaks close to the visual layout.
+- If a word or number is uncertain, write it as [?text].
+- If a line is unreadable, write [unreadable].
 
-Important checks:
-- If the photo says "plastic shower caps. _____ ; everyone who", write "plastic shower caps. [[BLANK ...]]; everyone who". The word "caps." is printed before the blank.
-- If the photo says "hot _____ as you go through, just in case. _____", write two separate blank tokens.
-- Check circled marker 31 carefully if visible: the marker belongs to the blank it physically touches, not a later blank or an earlier blank inferred from transcript flow.
-- For every non-null marker in a [[BLANK]] token, the same marker must appear in the Marker inventory and attached_visual_order must match that blank's visual_order.`;
+Important:
+- The transcript is intentionally not provided to this OCR step. A later parser will compare this OCR output with the saved transcript.`;
+}
+
+export function listeningMarkerBlankInventoryPrompt({
+  audioName = "audio",
+  transcript = "",
+  ocrDocument = "",
+} = {}) {
+  return `You are extracting a usable marker/blank inventory from IELTS listening worksheet photos.
+
+Audio metadata:
+- audio_name: ${audioName}
+
+Goal:
+- Return every real worksheet blank in visual order.
+- Return every visible blue circled handwritten marker and attach it to exactly one blank.
+- Use the worksheet photos as the source of truth for blank positions and marker attachment.
+- Use the transcript and OCR document only to recover nearby printed wording when the photo is blurry.
+- Do not solve the blanks and do not output answer text.
+
+What counts:
+- A real blank is a long printed dotted line or underline where transcript text was removed.
+- A marker is a blue handwritten circled number such as 1, 6, 11, 16, 21, 26, 31.
+- A marker belongs to the real blank line it touches, crosses, overlaps, or is closest to horizontally.
+- If a marker is blurry but its number is strongly implied by adjacent visible markers and the transcript/worksheet flow, include it with lower confidence and explain the evidence.
+- If the marker is unreadable and not safely inferable, keep marker null for that blank and add a warning.
+- Between two visible marker anchors, the number of blanks is fixed by the marker numbers. For example marker 6 followed by marker 11 means the marker 6 block has exactly five blanks: 6, 7, 8, 9, 10.
+- If you detect fewer blanks than the marker arithmetic requires, re-scan that page area. Use transcript alignment to find the missing worksheet gaps, then include them with lower confidence instead of omitting them.
+- A final marker such as 31 usually starts another five-answer block. Continue scanning after it; if the photo/transcript show five blanks, return all five.
+
+What to reject:
+- Tiny printed ellipses like "...", "Good ...", "Ah ...", "Now..." are not blanks.
+- Punctuation dots, page shadows, show-through text, circle outlines, and blue pen marks alone are not blanks.
+- Do not split one multi-line blank into two blanks when the dotted line wraps without a new printed lead-in, speaker turn, or marker.
+- Do not merge two separate blanks if printed text appears between them.
+
+Transcript support:
+- The transcript can help identify printed before/after context around a blurry blank.
+- Never put the missing answer phrase into before, after, or line_template.
+- line_template must contain [BLANK] exactly at the visible blank location, not [BLANK_1].
+- If only one side of the printed text is visible, keep the other side "".
+
+Return strict JSON only. No Markdown.
+
+Schema:
+{
+  "audio_name": "${audioName}",
+  "source": "marker_blank_inventory",
+  "visible_markers": [1, 6, 11],
+  "blanks": [
+    {
+      "visual_order": 1,
+      "marker": 1,
+      "speaker": "",
+      "before": "printed words before the blank",
+      "after": "printed words after the blank",
+      "line_template": "printed worksheet line with [BLANK] at the physical blank",
+      "page_hint": "image 1 page 68",
+      "lines": 1,
+      "blank_confidence": 0.95,
+      "marker_confidence": 0.9,
+      "blank_evidence": "long dotted line after visible printed words",
+      "marker_evidence": "blue circled 1 crosses this dotted line",
+      "note": ""
+    }
+  ],
+  "markers": [
+    {
+      "marker": 1,
+      "attached_visual_order": 1,
+      "nearby_printed_text": "printed words near attached blank",
+      "confidence": 0.9,
+      "assignment_reason": "circle touches the blank"
+    }
+  ],
+  "warnings": []
+}
+
+Validation:
+- blanks must include every visible real blank, in page/image visual order.
+- visual_order starts at 1 and increases by 1.
+- Use marker null except on the attached marker blank.
+- Every non-null blank marker must appear in visible_markers and markers.
+- Every marker in markers must have attached_visual_order matching one blank.
+- Marker numbers are absolute answer numbers. Do not renumber or normalize them.
+- For adjacent markers A and B, there must be exactly B-A blanks from marker A up to the blank immediately before marker B.
+- If the final visible marker appears to be part of the same worksheet/audio, scan until the end of that audio and include every following blank. Do not stop after 2-3 blanks just because the page is faint.
+- Before returning, compute the implied answer number for every blank from the marker anchors and add warnings for any block with fewer than five blanks unless the final page visibly ends earlier.
+- If visible_markers includes 31, the blank with marker 31 is the first blank of that block, not the last answer.
+- Prefer a lower confidence with a useful note over omitting a visible blank.
+
+Transcript for support:
+${transcript || "[TRANSCRIPT NOT AVAILABLE]"}
+
+OCR document for support:
+${ocrDocument || "[OCR DOCUMENT NOT AVAILABLE]"}`;
+}
+
+export function listeningMarkerBlankInventoryRepairPrompt({
+  audioName = "audio",
+  transcript = "",
+  ocrDocument = "",
+  inventory = "",
+  expectedMarkers = [],
+} = {}) {
+  return `You are repairing a marker/blank inventory for IELTS listening worksheet photos.
+
+Audio metadata:
+- audio_name: ${audioName}
+
+Inputs:
+1. Worksheet photos.
+2. OCR document with [[BLANK]] tokens.
+3. Transcript for alignment.
+4. Draft marker/blank inventory JSON.
+
+Task:
+- Return a corrected full marker/blank inventory JSON only.
+- Do not solve answers.
+- Do not merely copy the draft. Audit it against the photos, OCR, marker arithmetic, and transcript.
+- Your output must be directly usable to build a skeleton before answer filling.
+
+Expected marker anchors:
+${expectedMarkers.length ? expectedMarkers.join(", ") : "Use the markers visible in the draft/OCR/photos."}
+
+Hard rules:
+- A blue circled marker is an absolute answer number and attaches to exactly one blank.
+- Adjacent marker anchors determine required blank counts.
+- If marker 1 is followed by marker 6, the block starting at 1 must contain exactly 5 blanks.
+- If marker 6 is followed by marker 11, the block starting at 6 must contain exactly 5 blanks.
+- Continue this for 11->16, 16->21, 21->26, 26->31.
+- A final marker such as 31 starts a new block; inspect after it until the worksheet/audio ends. If the page shows five blanks after marker 31, return five blanks.
+- If the draft has fewer than the marker arithmetic requires, it is incomplete. Re-scan the relevant image region and add the missing blank entries.
+- If the OCR document has fewer [[BLANK]] tokens than the photo/transcript imply, trust the photo plus transcript and add the missing inventory blank with blank_confidence below 0.75 and a clear note.
+- If a missing blank is faint, partially cut off, or visually ambiguous, still include it when marker arithmetic plus transcript alignment make it the next worksheet blank.
+- Do not add answer text. before/after/line_template must contain printed worksheet text only.
+
+Repair workflow:
+1. List marker anchors in visual order.
+2. For each marker block, count accepted blanks before the next marker.
+3. If count is too low, inspect the transcript text between surrounding printed phrases and add the omitted worksheet gaps.
+4. If count is too high, remove only true non-blanks such as ellipses or punctuation dots.
+5. Renumber visual_order from 1 after repair.
+6. Keep marker only on the first blank of each marker block; non-anchor blanks use marker null.
+
+Return strict JSON only using the same schema:
+{
+  "audio_name": "${audioName}",
+  "source": "marker_blank_inventory_repaired",
+  "visible_markers": [1, 6, 11],
+  "blanks": [
+    {
+      "visual_order": 1,
+      "marker": 1,
+      "speaker": "",
+      "before": "printed words before the blank",
+      "after": "printed words after the blank",
+      "line_template": "printed worksheet line with [BLANK] at the physical blank",
+      "page_hint": "image 1 page 64",
+      "lines": 1,
+      "blank_confidence": 0.95,
+      "marker_confidence": 0.9,
+      "blank_evidence": "long dotted line / faint dotted line supported by transcript",
+      "marker_evidence": "blue circled marker touches this blank",
+      "note": ""
+    }
+  ],
+  "markers": [
+    {
+      "marker": 1,
+      "attached_visual_order": 1,
+      "nearby_printed_text": "printed words near attached blank",
+      "confidence": 0.9,
+      "assignment_reason": "circle touches the blank"
+    }
+  ],
+  "warnings": []
+}
+
+Validation before final answer:
+- Do not output markdown.
+- visual_order values are continuous.
+- Every required marker has one attached blank.
+- Every adjacent marker interval has exactly the expected number of blanks unless the final page visibly ends earlier; if you choose fewer, add a specific warning with evidence.
+- The draft may be wrong. Prefer the photos plus transcript over the draft.
+
+Transcript:
+${transcript || "[TRANSCRIPT NOT AVAILABLE]"}
+
+OCR document:
+${ocrDocument || "[OCR DOCUMENT NOT AVAILABLE]"}
+
+Draft inventory JSON:
+${inventory || "[DRAFT INVENTORY NOT AVAILABLE]"}`;
+}
+
+export function listeningMarkerBlockRepairPrompt({
+  audioName = "audio",
+  transcript = "",
+  ocrDocument = "",
+  inventory = "",
+  start = 1,
+  end = 5,
+  marker = 1,
+} = {}) {
+  return `You are repairing one IELTS listening marker block from worksheet photos.
+
+Audio metadata:
+- audio_name: ${audioName}
+
+Block to repair:
+- marker anchor: ${marker}
+- required answer numbers: ${start}-${end}
+- required blank count: ${end - start + 1}
+
+Task:
+- Return exactly ${end - start + 1} blanks for answer numbers ${start}-${end}.
+- Do not solve answers.
+- Use the worksheet photos as the source of truth.
+- Use the OCR document, transcript, and draft inventory as support only.
+- The draft inventory is known to be incomplete or miscounted for this block, so do not copy it blindly.
+
+Hard requirements:
+- Output one object per answer number ${start}-${end}, in order.
+- The first object must have "number": ${start} and "marker": ${marker}.
+- All other objects must have marker null.
+- If a visible blank is faint, cropped, or missed by OCR, still include it when marker arithmetic and transcript alignment show it must be present.
+- If the exact printed before/after is unclear, set before/after to "" or nearby visible text, but keep the blank object.
+- line_template must contain [BLANK] exactly once.
+- Never put the answer text inside before, after, or line_template.
+- Reject tiny ellipses as blanks, but do not reject a long dotted worksheet gap just because it is faint.
+
+Return strict JSON only. No Markdown.
+
+Schema:
+{
+  "audio_name": "${audioName}",
+  "source": "marker_block_repair",
+  "marker": ${marker},
+  "start": ${start},
+  "end": ${end},
+  "blanks": [
+    {
+      "number": ${start},
+      "marker": ${marker},
+      "speaker": "",
+      "before": "printed words before the blank",
+      "after": "printed words after the blank",
+      "line_template": "printed worksheet line with [BLANK] at the physical blank",
+      "page_hint": "image/page hint",
+      "lines": 1,
+      "blank_confidence": 0.8,
+      "marker_confidence": 0.9,
+      "blank_evidence": "visible/faint dotted line supported by transcript",
+      "marker_evidence": "blue circled marker touches this blank",
+      "note": ""
+    }
+  ],
+  "warnings": []
+}
+
+Validation:
+- blanks.length must be exactly ${end - start + 1}.
+- The set of number fields must be exactly ${rangeText(start, end)}.
+- Do not include blanks outside ${start}-${end}.
+- Do not return fewer blanks. If a blank is uncertain, include it with lower confidence and a note.
+
+Transcript:
+${transcript || "[TRANSCRIPT NOT AVAILABLE]"}
+
+OCR document:
+${ocrDocument || "[OCR DOCUMENT NOT AVAILABLE]"}
+
+Draft inventory JSON:
+${inventory || "[DRAFT INVENTORY NOT AVAILABLE]"}`;
 }
 
 export function listeningDocumentChunkSkeletonPrompt({
@@ -398,6 +651,11 @@ Core rule:
 - Do not cross into the next printed sentence unless the same visible blank clearly spans that whole text.
 - If the worksheet blank spans a whole clause or sentence, return the whole clause or sentence. If it is a short lexical blank, return only that short phrase.
 - Never use a blue marker number, punctuation mark, or isolated formatting artifact as an answer.
+- Never use IELTS navigation/control phrases as answers, such as "That is the end of section 1", "You now have half a minute", "Now turn to section 2", or "check your answers".
+- If two adjacent blanks get the same answer, re-check both contexts. Keep duplicate answers only when the transcript and skeleton clearly show the exact same missing span twice.
+- If the transcript span you chose includes the skeleton's printed before/after words, trim it so the answer contains only the missing text represented by [BLANK_N].
+- Prefer the shortest complete contiguous transcript span that satisfies the before/after context. Long clauses are allowed only when the blank line itself replaces a whole clause.
+- If the skeleton comes from source "local_ocr_parser", trust its line_template/before/after over broad topic signatures.
 - If before/after context is imperfect, use the worksheet photo to confirm the blank length and nearby printed words.
 - If a skeleton slot is visually unclear or cannot be matched safely in the transcript, write "unclear - reason".
 
@@ -423,6 +681,7 @@ Validation rules:
 - Preserve exact missing wording from the transcript. Do not summarize or shorten.
 - Preserve exact wording for names, numbers, addresses, prices, phone numbers, spelling, and units.
 - Do not include explanations for normal answers.
+- Reject any answer that is only a repeated prompt fragment, printed worksheet text, or post-section instruction.
 
 Transcript:
 ${transcript || "[TRANSCRIPT WILL BE INSERTED HERE]"}
@@ -556,4 +815,12 @@ Rules for answers:
 
 Transcript:
 ${transcript || "[TRANSCRIPT WILL BE INSERTED HERE]"}`;
+}
+
+function rangeText(start, end) {
+  const values = [];
+  for (let number = start; number <= end; number += 1) {
+    values.push(number);
+  }
+  return values.join(", ");
 }
