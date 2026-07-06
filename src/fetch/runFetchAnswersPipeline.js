@@ -4,6 +4,7 @@ import { createPartFromUri } from "@google/genai";
 import { createGeminiClient } from "../ai/geminiClient.js";
 import { extractAnswersForUnit } from "../answers/extractAnswers.js";
 import { classifyImagesBatch } from "../classifier/imageClassifier.js";
+import { alignListeningOcrToTranscript, formatListeningAlignmentAnswers } from "../listening/listeningAlignment.js";
 import {
   scanListeningWorksheetDocument,
   transcribeListeningAudio,
@@ -360,6 +361,16 @@ async function extractListeningUnit({ gemini, unit, audioFiles, answersDir, log 
   });
   await fs.writeFile(path.join(listeningDir, "worksheet_ocr.md"), ocrDocument);
 
+  log(`Aligning listening OCR with transcript for ${unit.unit_id}...`);
+  const alignment = alignListeningOcrToTranscript({
+    audioName,
+    transcript,
+    ocrDocument,
+  });
+  const alignmentText = formatListeningAlignmentAnswers(alignment);
+  await fs.writeFile(path.join(listeningDir, "ocr_transcript_alignment.json"), JSON.stringify(alignment, null, 2));
+  await fs.writeFile(path.join(listeningDir, "answers.md"), alignmentText);
+
   return {
     skill: "listening",
     unit_id: unit.unit_id,
@@ -368,7 +379,8 @@ async function extractListeningUnit({ gemini, unit, audioFiles, answersDir, log 
     audio: path.basename(audioPath),
     transcript_path: path.join("listening", unitId, "transcript.txt"),
     worksheet_ocr_path: path.join("listening", unitId, "worksheet_ocr.md"),
-    text: ocrDocument,
+    alignment_path: path.join("listening", unitId, "ocr_transcript_alignment.json"),
+    text: alignmentText,
   };
 }
 
