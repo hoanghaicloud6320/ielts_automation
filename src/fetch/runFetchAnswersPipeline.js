@@ -4,7 +4,7 @@ import { createPartFromUri } from "@google/genai";
 import { createGeminiClient } from "../ai/geminiClient.js";
 import { extractAnswersForUnit } from "../answers/extractAnswers.js";
 import { classifyImagesBatch } from "../classifier/imageClassifier.js";
-import { alignListeningOcrToTranscript, formatListeningAlignmentAnswers } from "../listening/listeningAlignment.js";
+import { extractListeningAnswersFromTranscriptOcr, formatListeningAlignmentAnswers } from "../listening/listeningAlignment.js";
 import {
   scanListeningWorksheetDocument,
   transcribeListeningAudio,
@@ -260,6 +260,7 @@ export async function runFetchAnswersPipeline({
       }
     }
 
+    const listeningAnswers = [];
     for (const unit of sortedUnits.listening) {
       log(`Extracting listening answers for ${unit.unit_id}...`);
       const answer = await extractListeningUnit({
@@ -270,6 +271,17 @@ export async function runFetchAnswersPipeline({
         log,
       });
       answerResults.push(answer);
+      if (!answer.skipped && answer.text) {
+        listeningAnswers.push([
+          `# listening/${unit.unit_id}`,
+          unit.title ? `\nTitle: ${unit.title}\n` : "",
+          answer.text,
+        ].join("\n"));
+      }
+    }
+
+    if (listeningAnswers.length) {
+      await fs.writeFile(path.join(answersDir, "listening.md"), `${listeningAnswers.join("\n\n---\n\n")}\n`);
     }
   }
 
@@ -361,14 +373,14 @@ async function extractListeningUnit({ gemini, unit, audioFiles, answersDir, log 
   });
   await fs.writeFile(path.join(listeningDir, "worksheet_ocr.md"), ocrDocument);
 
-  log(`Aligning listening OCR with transcript for ${unit.unit_id}...`);
-  const alignment = alignListeningOcrToTranscript({
+  log(`Extracting listening answers from transcript/OCR text gaps for ${unit.unit_id}...`);
+  const alignment = extractListeningAnswersFromTranscriptOcr({
     audioName,
     transcript,
     ocrDocument,
   });
   const alignmentText = formatListeningAlignmentAnswers(alignment);
-  await fs.writeFile(path.join(listeningDir, "ocr_transcript_alignment.json"), JSON.stringify(alignment, null, 2));
+  await fs.writeFile(path.join(listeningDir, "ocr_transcript_text_gaps.json"), JSON.stringify(alignment, null, 2));
   await fs.writeFile(path.join(listeningDir, "answers.md"), alignmentText);
 
   return {
@@ -379,7 +391,7 @@ async function extractListeningUnit({ gemini, unit, audioFiles, answersDir, log 
     audio: path.basename(audioPath),
     transcript_path: path.join("listening", unitId, "transcript.txt"),
     worksheet_ocr_path: path.join("listening", unitId, "worksheet_ocr.md"),
-    alignment_path: path.join("listening", unitId, "ocr_transcript_alignment.json"),
+    alignment_path: path.join("listening", unitId, "ocr_transcript_text_gaps.json"),
     text: alignmentText,
   };
 }

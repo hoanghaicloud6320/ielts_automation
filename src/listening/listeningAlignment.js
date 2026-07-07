@@ -138,6 +138,130 @@ export function alignListeningOcrToTranscript({ audioName = "audio", transcript 
   };
 }
 
+export function extractListeningAnswersFromTranscriptOcr({ audioName = "audio", transcript = "", ocrDocument = "" } = {}) {
+  const transcriptTokens = tokenizeTranscript(transcript);
+  const ocrTokens = tokenizeWorksheetOcrText(ocrDocument);
+  const warnings = [];
+
+  if (!transcriptTokens.length) {
+    warnings.push("Transcript has no usable tokens.");
+  }
+  if (!ocrTokens.length) {
+    warnings.push("Worksheet OCR has no usable text tokens.");
+  }
+
+  const tokenMatches = alignTokenSequences({ ocrTokens, transcriptTokens });
+  const answers = [];
+
+  for (let index = 0; index < tokenMatches.length - 1; index += 1) {
+    const left = tokenMatches[index];
+    const right = tokenMatches[index + 1];
+    const gapLength = right.transcript_index - left.transcript_index - 1;
+    if (gapLength <= 0 || gapLength > 32) {
+      continue;
+    }
+
+    const answerTokens = getTextOnlyGapAnswerTokens({
+      transcriptTokens,
+      start: left.transcript_index + 1,
+      end: right.transcript_index,
+    });
+    if (!isUsableTextOnlyAnswer(answerTokens)) {
+      continue;
+    }
+
+    answers.push({
+      source: "text_gap_ocr_transcript_matching",
+      answer_order: answers.length + 1,
+      answer_candidate: untokenizeTranscript(answerTokens),
+      transcript_span: {
+        start_token: left.transcript_index + 1,
+        end_token: right.transcript_index,
+        token_count: answerTokens.length,
+      },
+      left_ocr_token: left.ocr_token?.raw ?? "",
+      right_ocr_token: right.ocr_token?.raw ?? "",
+      signature: buildTextGapSignature({ ocrTokens, leftStreamIndex: left.stream_index, rightStreamIndex: right.stream_index }),
+      confidence: Number(Math.min(left.score, right.score).toFixed(3)),
+      warnings: [],
+    });
+  }
+
+  if (!answers.length && transcriptTokens.length && ocrTokens.length) {
+    warnings.push("No transcript gaps were detected between matched OCR text anchors.");
+  }
+
+  return {
+    audio_name: audioName,
+    source: "text_gap_ocr_transcript_matching",
+    transcript_token_count: transcriptTokens.length,
+    ocr_token_count: ocrTokens.length,
+    answer_count: answers.length,
+    answers,
+    warnings,
+  };
+}
+
+function tokenizeWorksheetOcrText(ocrDocument) {
+  const cleaned = String(ocrDocument ?? "")
+    .replace(/^#{1,4}\s+.*$/gm, " ")
+    .replace(BLANK_PATTERN, " ")
+    .replace(/(?:[._-]\s*){4,}/g, " ")
+    .replace(/\[(?:blank line|unreadable|TRANSCRIPT NOT AVAILABLE|OCR DOCUMENT NOT AVAILABLE)[^\]]*\]/gi, " ");
+  return tokenizeText(cleaned)
+    .map((token, streamIndex) => ({
+      type: "token",
+      stream_index: streamIndex,
+      ...token,
+    }))
+    .filter((token) => !shouldSkipGlobalOcrToken(token));
+}
+
+function getTextOnlyGapAnswerTokens({ transcriptTokens, start, end }) {
+  let tokens = getTextGapAnswerTokens({ start_token: start, end_token: end, warnings: [] }, transcriptTokens);
+  while (
+    tokens.length > 3 &&
+    LOW_INFORMATION_TOKENS.has(tokens[tokens.length - 1]?.norm) &&
+    !["i"].includes(tokens[tokens.length - 1]?.norm)
+  ) {
+    tokens = tokens.slice(0, -1);
+  }
+  while (
+    tokens.length > 3 &&
+    LOW_INFORMATION_TOKENS.has(tokens[0]?.norm) &&
+    !["i"].includes(tokens[0]?.norm)
+  ) {
+    tokens = tokens.slice(1);
+  }
+  return tokens;
+}
+
+function isUsableTextOnlyAnswer(tokens) {
+  if (tokens.length < 3 || tokens.length > 32) {
+    return false;
+  }
+  const usefulTokens = tokens.filter((token) => !LOW_INFORMATION_TOKENS.has(token.norm));
+  if (usefulTokens.length < 2) {
+    return false;
+  }
+  if (tokens.every((token) => /^\d+$/.test(token.norm))) {
+    return false;
+  }
+  return true;
+}
+
+function buildTextGapSignature({ ocrTokens, leftStreamIndex, rightStreamIndex }) {
+  const leftContext = ocrTokens
+    .filter((token) => token.stream_index <= leftStreamIndex)
+    .slice(-7)
+    .map((token) => token.raw);
+  const rightContext = ocrTokens
+    .filter((token) => token.stream_index >= rightStreamIndex)
+    .slice(0, 7)
+    .map((token) => token.raw);
+  return trimWords([...leftContext, "...", ...rightContext].join(" "), 18);
+}
+
 function buildTranscriptGapAlignment({ transcriptTokens, ocr }) {
   const tokenMatches = matchOcrTextTokensToTranscript({ transcriptTokens, stream: ocr.stream });
   const gaps = [];
@@ -538,26 +662,57 @@ function normalizeAnswer(answer) {
 }
 
 export function formatListeningAlignmentAnswers(alignment) {
+  const entries = alignment.answers ?? [];
   const lines = [
     `# ${alignment.audio_name}`,
     "",
-    `Detected blanks: ${alignment.detected_blank_count}`,
-    `Detected answers: ${alignment.answer_count ?? alignment.answers?.length ?? alignment.blanks?.length ?? 0}`,
-    "",
   ];
 
-  const answers = alignment.answers?.length ? alignment.answers : alignment.blanks ?? [];
-  for (const answer of answers) {
-    const order = answer.answer_order ?? answer.visual_order;
-    const hint = answer.nearest_ocr_blank?.visual_order != null
-      ? ` _(nearest OCR blank ${answer.nearest_ocr_blank.visual_order})_`
-      : "";
-    const warningText = answer.warnings?.length ? ` _(${answer.warnings.join("; ")})_` : "";
-    lines.push(`* **${order}.** ${answer.answer_candidate || "unclear"}${hint}${warningText}`);
+  const blocks = groupTextGapAnswers(entries);
+  for (const [index, block] of blocks.entries()) {
+    lines.push(`### BLOCK ${index + 1}`);
+    lines.push("");
+    lines.push(`* **Signature:** \`${block.signature || "unclear"}\``);
+    for (const entry of block.entries) {
+      lines.push(`* **${entry.number}.** ${entry.answer_candidate || "unclear"}`);
+    }
+    lines.push("");
   }
 
-  lines.push("");
+  const warnings = [
+    ...(alignment.warnings ?? []),
+    ...entries.flatMap((entry) => entry.warnings ?? []),
+  ].filter(Boolean);
+  if (warnings.length) {
+    lines.push("### Notes");
+    lines.push("");
+    for (const warning of [...new Set(warnings)]) {
+      lines.push(`* ${warning}`);
+    }
+    lines.push("");
+  }
+
   return lines.join("\n");
+}
+
+function groupTextGapAnswers(entries) {
+  const blocks = [];
+  for (let index = 0; index < entries.length; index += 5) {
+    const blockEntries = entries.slice(index, index + 5).map((entry, offset) => ({
+      ...entry,
+      number: entry.answer_order ?? index + offset + 1,
+    }));
+    blocks.push({
+      entries: blockEntries,
+      signature: blockEntries[0]?.signature ?? "",
+    });
+  }
+  return blocks;
+}
+
+function trimWords(text, maxWords) {
+  const words = String(text ?? "").split(/\s+/).filter(Boolean);
+  return words.slice(0, maxWords).join(" ");
 }
 
 function parseOcrDocumentBlanks(ocrDocument) {
