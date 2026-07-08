@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { generateContentWithRetry } from "../ai/generateWithRetry.js";
+import { DEFAULT_GEMINI_MODEL } from "../config/defaults.js";
 import {
   listeningChunkSkeletonReviewPrompt,
   listeningChunkSkeletonPrompt,
@@ -14,7 +15,7 @@ import {
   listeningTranscriptPrompt,
 } from "./listeningPrompts.js";
 
-const LISTENING_WORKSHEET_OCR_MODEL = "gemini-3.5-flash";
+const LISTENING_WORKSHEET_OCR_MODEL = DEFAULT_GEMINI_MODEL;
 
 export async function transcribeListeningAudio({ gemini, audioName, audioPart, log = null }) {
   const response = await generateContentWithRetry({

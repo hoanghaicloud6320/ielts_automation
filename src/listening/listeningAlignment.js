@@ -151,6 +151,7 @@ export function extractListeningAnswersFromTranscriptOcr({ audioName = "audio", 
   }
 
   const tokenMatches = alignTokenSequences({ ocrTokens, transcriptTokens });
+  const ocrCompactText = ocrTokens.map((token) => token.norm).join("");
   const answers = [];
 
   for (let index = 0; index < tokenMatches.length - 1; index += 1) {
@@ -166,7 +167,7 @@ export function extractListeningAnswersFromTranscriptOcr({ audioName = "audio", 
       start: left.transcript_index + 1,
       end: right.transcript_index,
     });
-    if (!isUsableTextOnlyAnswer(answerTokens)) {
+    if (!isUsableTextOnlyAnswer(answerTokens, { ocrCompactText })) {
       continue;
     }
 
@@ -214,29 +215,22 @@ function tokenizeWorksheetOcrText(ocrDocument) {
       stream_index: streamIndex,
       ...token,
     }))
-    .filter((token) => !shouldSkipGlobalOcrToken(token));
+    .filter((token) => !shouldSkipWorksheetOcrToken(token));
 }
 
 function getTextOnlyGapAnswerTokens({ transcriptTokens, start, end }) {
   let tokens = getTextGapAnswerTokens({ start_token: start, end_token: end, warnings: [] }, transcriptTokens);
   while (
     tokens.length > 3 &&
-    LOW_INFORMATION_TOKENS.has(tokens[tokens.length - 1]?.norm) &&
-    !["i"].includes(tokens[tokens.length - 1]?.norm)
+    TEXT_ONLY_TRAILING_TRIM_TOKENS.has(tokens[tokens.length - 1]?.norm) &&
+    tokens[tokens.length - 1]?.norm !== "i"
   ) {
     tokens = tokens.slice(0, -1);
-  }
-  while (
-    tokens.length > 3 &&
-    LOW_INFORMATION_TOKENS.has(tokens[0]?.norm) &&
-    !["i"].includes(tokens[0]?.norm)
-  ) {
-    tokens = tokens.slice(1);
   }
   return tokens;
 }
 
-function isUsableTextOnlyAnswer(tokens) {
+function isUsableTextOnlyAnswer(tokens, { ocrCompactText }) {
   if (tokens.length < 3 || tokens.length > 32) {
     return false;
   }
@@ -247,7 +241,54 @@ function isUsableTextOnlyAnswer(tokens) {
   if (tokens.every((token) => /^\d+$/.test(token.norm))) {
     return false;
   }
+  const usefulLength = usefulTokens.map((token) => token.norm).join("").length;
+  if (usefulLength < TEXT_ONLY_MIN_USEFUL_CHARS) {
+    return false;
+  }
+  const usefulCompact = usefulTokens.map((token) => token.norm).join("");
+  const fullCompact = tokens.map((token) => token.norm).join("");
+  if (usefulCompact.length >= 5 && compactAppearsInOcr(usefulCompact, ocrCompactText)) {
+    return false;
+  }
+  if (fullCompact.length >= 5 && compactAppearsInOcr(fullCompact, ocrCompactText)) {
+    return false;
+  }
+  if (usefulTokens.every((token) => /^\d+$/.test(token.norm))) {
+    const digitCount = usefulTokens.map((token) => token.norm).join("").length;
+    return digitCount >= 7;
+  }
   return true;
+}
+
+function compactAppearsInOcr(compact, ocrCompactText) {
+  if (ocrCompactText.includes(compact)) {
+    return true;
+  }
+  if (compact.length < 8) {
+    return false;
+  }
+  const maxDistance = Math.max(1, Math.floor(compact.length * 0.15));
+  const minLength = Math.max(1, compact.length - maxDistance);
+  const maxLength = compact.length + maxDistance;
+  for (let length = minLength; length <= maxLength; length += 1) {
+    for (let index = 0; index + length <= ocrCompactText.length; index += 1) {
+      const slice = ocrCompactText.slice(index, index + length);
+      if (editDistanceBounded(compact, slice, maxDistance) != null) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function shouldSkipWorksheetOcrToken(token) {
+  if (!token?.norm) {
+    return true;
+  }
+  if (/^\d+$/.test(token.norm) && token.norm.length <= 2) {
+    return true;
+  }
+  return token.norm.length <= 2 && !TEXT_ONLY_SHORT_OCR_TOKENS.has(token.norm);
 }
 
 function buildTextGapSignature({ ocrTokens, leftStreamIndex, rightStreamIndex }) {
@@ -1162,3 +1203,6 @@ const BOUNDARY_TRIM_TOKENS = new Set([
 
 const TRAILING_CONTEXT_TOKENS = new Set(["ok", "okay"]);
 const ALWAYS_TRIM_TRAILING_TOKENS = new Set(["ok", "okay"]);
+const TEXT_ONLY_MIN_USEFUL_CHARS = 12;
+const TEXT_ONLY_SHORT_OCR_TOKENS = new Set(["ah", "oh", "ok", "no", "so", "go"]);
+const TEXT_ONLY_TRAILING_TRIM_TOKENS = new Set(["and", "as", "but", "for", "if", "it", "of", "or", "so", "to", "we", "with"]);
