@@ -13,7 +13,7 @@ import {
 } from "../src/config/defaults.js";
 import { runFetchAnswersPipeline } from "../src/fetch/runFetchAnswersPipeline.js";
 import { reorderPages } from "../src/reorder/pageReorderer.js";
-import { loadGeminiApiKey } from "../src/secrets/loadGeminiApiKey.js";
+import { loadGeminiApiKeys } from "../src/secrets/loadGeminiApiKey.js";
 import { createSessionFromDropDir, renameSessionFromFetchReport } from "../src/session/dropboxSessions.js";
 import { runSubmitPipeline } from "../src/submit/runSubmitPipeline.js";
 import { checkRcloneRemote } from "../src/upload/rcloneUploader.js";
@@ -189,8 +189,8 @@ async function main() {
     if (!imagePath) {
       throw new Error("Missing image path.");
     }
-    const apiKey = await loadGeminiApiKey();
-    const gemini = createGeminiClient({ apiKey, model: options.model });
+    const apiKeys = await loadGeminiApiKeys();
+    const gemini = createGeminiClient({ apiKeys, model: options.model });
     const classification = await classifyImage({ gemini, imagePath });
     console.log(JSON.stringify(classification, null, 2));
     return;
@@ -228,8 +228,8 @@ async function main() {
 }
 
 async function reorderWithGemini({ imagePaths, skill, model }) {
-  const apiKey = await loadGeminiApiKey();
-  const gemini = createGeminiClient({ apiKey, model });
+  const apiKeys = await loadGeminiApiKeys();
+  const gemini = createGeminiClient({ apiKeys, model });
   return reorderPages({
     gemini,
     imagePaths,

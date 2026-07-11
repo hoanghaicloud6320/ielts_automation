@@ -23,7 +23,7 @@ Tao file:
 gemini-api-key.txt
 ```
 
-Va paste API key vao do.
+Va paste API key vao do. Neu co nhieu key, dat moi key tren mot dong; he thong se tu xoay key khi gap loi tam thoi nhu 429/503.
 
 ### 3. Config Google Drive bang rclone
 

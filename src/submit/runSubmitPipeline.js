@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createGeminiClient } from "../ai/geminiClient.js";
 import { classifyImage } from "../classifier/imageClassifier.js";
-import { loadGeminiApiKey } from "../secrets/loadGeminiApiKey.js";
+import { loadGeminiApiKeys } from "../secrets/loadGeminiApiKey.js";
 import { uploadLessonWithRclone } from "../upload/rcloneUploader.js";
 import { copyFileEnsuringDir, ensureDir, listImageFiles, pathExists } from "../utils/files.js";
 import { routeClassification } from "./routeClassification.js";
@@ -26,8 +26,8 @@ export async function runSubmitPipeline({
     throw new Error(`Lesson folder does not exist: ${resolvedLessonDir}`);
   }
 
-  const apiKey = await loadGeminiApiKey({ cwd });
-  const gemini = createGeminiClient({ apiKey, model });
+  const apiKeys = await loadGeminiApiKeys({ cwd });
+  const gemini = createGeminiClient({ apiKeys, model });
   const imageFiles = await listImageFiles(resolvedLessonDir);
 
   if (!imageFiles.length) {

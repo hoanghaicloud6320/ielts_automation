@@ -9,7 +9,7 @@ import {
   scanListeningWorksheetDocument,
   transcribeListeningAudio,
 } from "../listening/listeningExtractor.js";
-import { loadGeminiApiKey } from "../secrets/loadGeminiApiKey.js";
+import { loadGeminiApiKeys } from "../secrets/loadGeminiApiKey.js";
 import { inventorySkillPages } from "../units/pageInventory.js";
 import { sortAndGroupSkillPagesFromInventory } from "../units/skillSortGrouper.js";
 import { copyFileEnsuringDir, ensureDir, listImageFiles, pathExists } from "../utils/files.js";
@@ -39,8 +39,8 @@ export async function runFetchAnswersPipeline({
   log("Photo tips: keep text sharp, avoid glare/tilt, include full passage/questions, and include page/unit numbers when possible.");
   log("Cross-unit photos are OK; the same image can be assigned to multiple units when needed.");
 
-  const apiKey = await loadGeminiApiKey({ cwd });
-  const gemini = createGeminiClient({ apiKey, model });
+  const apiKeys = await loadGeminiApiKeys({ cwd });
+  const gemini = createGeminiClient({ apiKeys, model });
   const imageFiles = await listImageFiles(resolvedLessonDir);
   const audioFiles = await listAudioFiles(resolvedLessonDir);
 

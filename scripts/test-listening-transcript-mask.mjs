@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 import { createGeminiClient } from "../src/ai/geminiClient.js";
 import { generateContentWithRetry } from "../src/ai/generateWithRetry.js";
-import { loadGeminiApiKey } from "../src/secrets/loadGeminiApiKey.js";
+import { loadGeminiApiKeys } from "../src/secrets/loadGeminiApiKey.js";
 
 const DEFAULT_SESSION =
   "user_data/fetch_sessions/20260707_135055_read_reading_passage_3_-_information_theory_read_test_4_reading_passage";
@@ -34,8 +34,8 @@ if (args.imageIndex) {
 
 await fs.mkdir(outputDir, { recursive: true });
 
-const apiKey = await loadGeminiApiKey();
-const gemini = createGeminiClient({ apiKey, model });
+const apiKeys = await loadGeminiApiKeys();
+const gemini = createGeminiClient({ apiKeys, model });
 const parts = [
   {
     text: transcriptMaskPrompt({
